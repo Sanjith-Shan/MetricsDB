@@ -65,7 +65,7 @@ public final class MemSeries {
             oooV = new double[8];
         }
         int pos = Arrays.binarySearch(oooT, 0, oooN, t);
-        if (pos >= 0) return Result.DUPLICATE;
+        if (pos >= 0 || inChunks(t)) return Result.DUPLICATE;
         if (oooN >= MAX_OOO) return Result.OOO_FULL;
         pos = -pos - 1;
         if (oooN == oooT.length) {
@@ -78,6 +78,26 @@ public final class MemSeries {
         oooV[pos] = v;
         oooN++;
         return Result.OOO;
+    }
+
+    /** Whether an in-order chunk already holds timestamp t (late samples are rare, so decoding one chunk is fine). */
+    private boolean inChunks(long t) {
+        for (int i = sealed.size() - 1; i >= 0; i--) {
+            Chunk c = sealed.get(i);
+            if (t >= c.minT() && t <= c.maxT()) return containsT(c.iterator(), t);
+        }
+        if (open != null && open.count() > 0 && t >= open.minT() && t <= open.maxT()) {
+            return containsT(new XorChunk.Iterator(open.toBytes()), t);
+        }
+        return false;
+    }
+
+    private static boolean containsT(XorChunk.Iterator it, long t) {
+        while (it.next()) {
+            if (it.t() == t) return true;
+            if (it.t() > t) return false;
+        }
+        return false;
     }
 
     private void seal() {
@@ -93,7 +113,7 @@ public final class MemSeries {
         }
         if (oooN > 0) {
             int from = lowerBound(oooT, oooN, mint);
-            int to = lowerBound(oooT, oooN, maxt + 1);
+            int to = maxt == Long.MAX_VALUE ? oooN : lowerBound(oooT, oooN, maxt + 1);
             if (to > from) out.add(Chunk.of(oooT[from], oooT[to - 1], XorChunk.encode(oooT, oooV, from, to)));
         }
     }

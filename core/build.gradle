@@ -21,3 +21,7 @@ jmh {
     resultsFile = project.file("${buildDir}/results/jmh/results.json")
     if (project.hasProperty('jmhInclude')) { includes = [project.property('jmhInclude')] }
 }
+
+test {
+    systemProperty 'test.classpath', sourceSets.test.runtimeClasspath.asPath
+}
