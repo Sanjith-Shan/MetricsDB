@@ -1,0 +1,62 @@
+{"uid": "metricsdb-self", "title": "MetricsDB monitoring itself", "schemaVersion": 39, "version": 1, "refresh": "10s",
+ "time": {"from": "now-30m", "to": "now"}, "tags": ["metricsdb"], "panels": [
+    {"id": 1, "type": "timeseries", "title": "Samples ingested per second", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+     "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "sum by (instance) (rate(metricsdb_ingest_samples_total{result=\"accepted\"}[1m]))", "legendFormat": "{{instance}}"}]}
+,
+    {"id": 2, "type": "timeseries", "title": "WAL fsync latency, p99", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+     "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "histogram_quantile(0.99, sum by (le, instance) (rate(metricsdb_wal_fsync_seconds_bucket[1m])))", "legendFormat": "{{instance}}"}]}
+,
+    {"id": 3, "type": "timeseries", "title": "Series in the head", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+     "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "metricsdb_head_series", "legendFormat": "{{instance}}"}]}
+,
+    {"id": 4, "type": "timeseries", "title": "Query latency p99 by type", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+     "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "histogram_quantile(0.99, sum by (le, type, path) (rate(metricsdb_query_seconds_bucket[1m])))", "legendFormat": "{{type}} {{path}}"}]}
+,
+    {"id": 5, "type": "timeseries", "title": "Ingest request latency p99 by protocol", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+     "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "histogram_quantile(0.99, sum by (le, protocol) (rate(metricsdb_ingest_request_seconds_bucket[1m])))", "legendFormat": "{{protocol}}"}]}
+,
+    {"id": 6, "type": "timeseries", "title": "Samples refused per second", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+     "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "sum by (result) (rate(metricsdb_ingest_samples_total{result!=\"accepted\"}[1m]))", "legendFormat": "{{result}}"}]}
+,
+    {"id": 7, "type": "timeseries", "title": "Head cut and compaction time (mean)", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+     "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "rate(metricsdb_compaction_seconds_sum[5m]) / rate(metricsdb_compaction_seconds_count[5m])", "legendFormat": "compaction {{instance}}"}]}
+,
+    {"id": 8, "type": "timeseries", "title": "Bytes on disk", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+     "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "metricsdb_block_bytes", "legendFormat": "blocks {{instance}}"}]}
+,
+    {"id": 9, "type": "timeseries", "title": "JVM heap used", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+     "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "sum by (instance) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{instance}}"}]}
+,
+    {"id": 10, "type": "timeseries", "title": "Prometheus remote write: samples sent per second", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+     "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "rate(prometheus_remote_storage_samples_total[1m])", "legendFormat": "sent"}]}
+]}

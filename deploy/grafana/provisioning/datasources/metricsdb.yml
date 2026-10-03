@@ -1,0 +1,11 @@
+apiVersion: 1
+datasources:
+  - name: MetricsDB
+    uid: metricsdb
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:9201
+    isDefault: true
+    jsonData:
+      timeInterval: 5s
+      httpMethod: POST

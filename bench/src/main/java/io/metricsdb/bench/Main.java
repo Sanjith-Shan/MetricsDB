@@ -16,6 +16,7 @@ public final class Main {
             case "diff" -> Diff.run(a);
             case "exp5" -> Exp5.run(a);
             case "ooo" -> OooExp.run(a);
+            case "faults" -> Faults.run(a);
             default -> throw new IllegalArgumentException("unknown command " + args[0]);
         }
     }

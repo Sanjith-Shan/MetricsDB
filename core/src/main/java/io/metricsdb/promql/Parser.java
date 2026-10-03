@@ -187,6 +187,9 @@ public final class Parser {
         }
         expect(T.RPAREN);
         if (!Functions.isKnown(f.text())) throw new ParseException("unsupported function " + f.text(), f.pos());
+        if (Functions.RANGE.contains(f.text()) && (args.size() != 1 || !(args.get(0) instanceof Ast.MatrixSel))) {
+            throw new ParseException(f.text() + " expects one range vector argument, like " + f.text() + "(x[5m])", f.pos());
+        }
         return new Ast.Call(f.text(), args);
     }
 

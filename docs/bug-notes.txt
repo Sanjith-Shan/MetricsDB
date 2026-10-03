@@ -1,1 +1,0 @@
-1. MemSeries.chunks maxt+1 overflow with Long.MAX_VALUE: OOO samples dropped from full-range reads and from the WAL checkpoint written at startup, so late samples acknowledged before a restart vanished. Found by TsdbTest property (restart round) and CrashRecoveryTest (kill -9, gen 0 batch 0 lost).

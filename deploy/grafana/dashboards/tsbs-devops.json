@@ -1,0 +1,26 @@
+{"uid": "tsbs-devops", "title": "Standard benchmark data (TSBS DevOps)", "schemaVersion": 39, "version": 1,
+ "time": {"from": "2026-10-01T00:00:00.000Z", "to": "2026-10-02T00:00:00.000Z"}, "tags": ["metricsdb"], "panels": [
+    {"id": 1, "type": "timeseries", "title": "cpu_usage_user, max per 10 minutes, hosts 0 to 4", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+     "fieldConfig": {"defaults": {"unit": "percent", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "max by (hostname) (max_over_time(cpu_usage_user{hostname=~\"host_[0-4]\"}[10m]))", "legendFormat": "{{hostname}}"}]}
+,
+    {"id": 2, "type": "timeseries", "title": "Mean CPU per region (all hosts)", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+     "fieldConfig": {"defaults": {"unit": "percent", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "avg by (region) (avg_over_time(cpu_usage_user[10m]))", "legendFormat": "{{region}}"}]}
+,
+    {"id": 3, "type": "timeseries", "title": "Memory used, hosts 0 to 4", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+     "fieldConfig": {"defaults": {"unit": "percent", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "mem_used_percent{hostname=~\"host_[0-4]\"}", "legendFormat": "{{hostname}}"}]}
+,
+    {"id": 4, "type": "timeseries", "title": "Hosts with a CPU over 90 in the window", "datasource": {"type": "prometheus", "uid": "metricsdb"},
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+     "fieldConfig": {"defaults": {"unit": "short", "custom": {"lineWidth": 2, "fillOpacity": 8}}, "overrides": []},
+     "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+     "targets": [{"refId": "A", "expr": "count(max_over_time(cpu_usage_user[10m]) > 90)", "legendFormat": "hosts"}]}
+]}

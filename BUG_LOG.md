@@ -1,0 +1,8 @@
+# Bug log
+
+Every bug found while building MetricsDB, with the tool or check that found it. Newest last.
+
+| # | Date | Component | Symptom | Found by | Cause | Fix |
+|---|---|---|---|---|---|---|
+| 1 | 2026-10-03 | head (`MemSeries.chunks`) | After a restart, a few late (out-of-order) samples were missing; in the crash test, an acknowledged batch from before a `kill -9` was gone | `TsdbTest` storage property (the restart round) and `CrashRecoveryTest` (kill -9, generation 0, batch 0 lost), on their first run | Reading a series over the full range computed `maxt + 1` to bound the out-of-order buffer; with `maxt = Long.MAX_VALUE` that overflowed to `Long.MIN_VALUE`, so the late samples were skipped. The WAL checkpoint written at startup reads the head over the full range, so those samples were dropped from the new checkpoint and the old WAL segments holding them were deleted: acknowledged data lost on the second restart | Bound the range without the `+ 1` when `maxt` is `Long.MAX_VALUE`. Both properties pass: 15 random workloads with restarts, cuts and compaction, and 18 kill -9s with every acknowledged sample read back bit for bit |
+| 2 | 2026-10-03 | crash test harness | `CrashRecoveryTest` failed with "child acknowledged nothing before the kill", and a child JVM was left running for minutes | Test report, then `ps` inside WSL | The kill timer started when the child printed READY. With the host CPU at 100% (another job), the first fsync-acknowledged batch took longer than the shortest kill delay (300 ms). The assertion then threw before the kill, leaving the child alive | The kill delay now starts at the first acknowledgement, and the child is killed in a `finally` block |
