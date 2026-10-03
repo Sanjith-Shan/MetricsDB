@@ -1,0 +1,21 @@
+plugins {
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+dependencies {
+    implementation project(':core')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'net.jqwik:jqwik:1.9.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.21.3'
+    testImplementation 'org.testcontainers:testcontainers:1.21.3'
+    testImplementation 'org.xerial.snappy:snappy-java:1.1.10.7'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+bootJar { archiveFileName = 'metricsdb.jar' }
+jar { enabled = false }

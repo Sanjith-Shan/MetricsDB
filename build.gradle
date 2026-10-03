@@ -1,0 +1,22 @@
+plugins {
+    id 'org.springframework.boot' version '3.5.6' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'me.champeau.jmh' version '0.7.3' apply false
+}
+
+allprojects {
+    group = 'io.metricsdb'
+    version = '0.1.0'
+    repositories { mavenCentral() }
+}
+
+subprojects {
+    apply plugin: 'java'
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+    tasks.withType(JavaCompile).configureEach { options.compilerArgs += ['-parameters'] }
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform { includeEngines 'junit-jupiter', 'jqwik' }
+        testLogging { events 'failed'; exceptionFormat 'full' }
+        maxHeapSize = '1g'
+    }
+}

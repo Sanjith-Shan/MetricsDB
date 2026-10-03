@@ -1,0 +1,2 @@
+rootProject.name = 'metricsdb'
+include 'core', 'server', 'bench'

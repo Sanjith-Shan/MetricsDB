@@ -1,0 +1,23 @@
+plugins {
+    id 'java-library'
+    id 'me.champeau.jmh'
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.12.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'net.jqwik:jqwik:1.9.3'
+    testImplementation 'org.xerial.snappy:snappy-java:1.1.10.7'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+jmh {
+    warmupIterations = 3
+    iterations = 5
+    fork = 1
+    timeOnIteration = '2s'
+    warmup = '2s'
+    resultFormat = 'JSON'
+    resultsFile = project.file("${buildDir}/results/jmh/results.json")
+    if (project.hasProperty('jmhInclude')) { includes = [project.property('jmhInclude')] }
+}
