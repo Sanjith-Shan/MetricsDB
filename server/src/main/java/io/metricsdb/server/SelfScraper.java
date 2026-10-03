@@ -4,6 +4,7 @@ import io.metricsdb.ingest.Exposition;
 import io.metricsdb.model.Labels;
 import io.metricsdb.storage.WriteBatch;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -16,10 +17,11 @@ import java.time.Duration;
  */
 @Component
 public class SelfScraper {
-    public SelfScraper(MetricsDbProperties props, NodeConfig.Node node, PrometheusMeterRegistry registry,
+    public SelfScraper(MetricsDbProperties props, NodeConfig.Node node, ObjectProvider<PrometheusMeterRegistry> registries,
                        @Value("${server.port:9201}") int port) {
         Duration every = props.getSelfScrape().getInterval();
-        if (every.isZero()) return;
+        PrometheusMeterRegistry registry = registries.getIfAvailable();
+        if (every.isZero() || registry == null) return;
         Labels extra = Labels.of("job", "metricsdb", "instance", props.getNodeName());
         Thread.ofVirtual().name("self-scrape").start(() -> {
             while (true) {

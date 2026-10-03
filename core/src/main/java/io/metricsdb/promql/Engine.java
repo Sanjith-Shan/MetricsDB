@@ -106,9 +106,12 @@ public final class Engine {
         if (stepMs <= 0) throw new ParseException("step must be positive", -1);
         if (endMs < startMs) throw new ParseException("end is before start", -1);
         if (opt.alignLikeVictoriaMetrics && (endMs - startMs) >= 50 * stepMs) {
+            long pointsBefore = (endMs - startMs) / stepMs + 1;
             startMs -= Math.floorMod(startMs, stepMs);
             long adj = Math.floorMod(endMs, stepMs);
             if (adj > 0) endMs += stepMs - adj;
+            // keep the number of points unchanged by the rounding, as VictoriaMetrics does
+            if ((endMs - startMs) / stepMs + 1 != pointsBefore) endMs -= stepMs;
         }
         long steps = (endMs - startMs) / stepMs + 1;
         if (steps > opt.maxSteps) {

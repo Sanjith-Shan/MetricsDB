@@ -20,11 +20,12 @@ public final class QueryBench {
         List<Queries.Q> qs = Queries.load(a.req("queries"), a.str("types", null));
         int workers = a.i("workers", 1);
         boolean warm = !a.b("no-warmup");
+        String suffix = a.str("suffix", "");
         Map<String, List<Queries.Q>> byType = new LinkedHashMap<>();
         for (Queries.Q q : qs) byType.computeIfAbsent(q.type(), k -> new java.util.ArrayList<>()).add(q);
         for (var e : byType.entrySet()) {
             List<Queries.Q> list = e.getValue();
-            if (warm) for (Queries.Q q : list) Queries.get(base, q.path(), Duration.ofSeconds(120));
+            if (warm) for (Queries.Q q : list) Queries.get(base, q.path() + suffix, Duration.ofSeconds(120));
             Histogram h = new Histogram(600_000_000L, 3);
             AtomicInteger next = new AtomicInteger(), errors = new AtomicInteger();
             String[] firstError = new String[1];
@@ -34,7 +35,7 @@ public final class QueryBench {
                 ts[w] = Thread.ofPlatform().start(() -> {
                     int i;
                     while ((i = next.getAndIncrement()) < list.size()) {
-                        Queries.Resp r = Queries.get(base, list.get(i).path(), Duration.ofSeconds(120));
+                        Queries.Resp r = Queries.get(base, list.get(i).path() + suffix, Duration.ofSeconds(120));
                         if (r.status() / 100 != 2) {
                             errors.incrementAndGet();
                             synchronized (firstError) { if (firstError[0] == null) firstError[0] = r.status() + " " + r.body(); }
