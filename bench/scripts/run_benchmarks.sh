@@ -18,7 +18,7 @@ done
 # MetricsDB with the WAL fsync off, which is how VictoriaMetrics acknowledges by default (it flushes
 # buffered data every few seconds), as a second, like-for-like ingest row
 wait_idle
-MDB_ARGS="--metricsdb.storage.wal-sync=none" $REPO/bench/scripts/exp_ingest.sh metricsdb metricsdb-fsync-off
+MDB_ARGS="--metricsdb.storage.wal-sync=none" KEEP=1 $REPO/bench/scripts/exp_ingest.sh metricsdb metricsdb-fsync-off
 KEEP=1 $REPO/bench/scripts/db.sh stop metricsdb
 for r in $(seq 1 $REPEAT); do
   wait_idle

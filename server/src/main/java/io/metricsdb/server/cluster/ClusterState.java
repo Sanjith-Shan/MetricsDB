@@ -20,6 +20,7 @@ public final class ClusterState implements AutoCloseable {
     public final HashRing ring;
     public final List<NodeClient> nodes;
     private final AtomicIntegerArray up;
+    private final AtomicIntegerArray probeFailures;
     private final List<IntConsumer> onUp = new CopyOnWriteArrayList<>();
     private final Thread health;
     private volatile boolean closed;
@@ -37,6 +38,7 @@ public final class ClusterState implements AutoCloseable {
         this.nodes = List.copyOf(clients);
         this.ring = new HashRing(names, cfg.getVnodes(), cfg.getReplicationFactor());
         this.up = new AtomicIntegerArray(nodes.size());
+        this.probeFailures = new AtomicIntegerArray(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             up.set(i, 1);
             final int n = i;
@@ -51,12 +53,17 @@ public final class ClusterState implements AutoCloseable {
         });
     }
 
+    /**
+     * A probe that fails twice in a row marks the node down; one slow reply on a starved machine
+     * should not. A failed write or query marks it down at once (see {@link #markDown}).
+     */
     private void probe(int i) {
         try {
-            nodes.get(i).get("/internal/health", Duration.ofMillis(400));
+            nodes.get(i).get("/internal/health", Duration.ofMillis(1000));
+            probeFailures.set(i, 0);
             markUp(i);
         } catch (Exception e) {
-            markDown(i);
+            if (probeFailures.incrementAndGet(i) >= 2) markDown(i);
         }
     }
 
