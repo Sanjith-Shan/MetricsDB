@@ -48,6 +48,17 @@ def latest_by(rs, key):
     return out
 
 
+def median_by(rs, key, value):
+    """Median of value(r) per key(r): the same aggregation NUMBERS.md uses."""
+    import statistics
+    groups = defaultdict(list)
+    for r in rs:
+        v = value(r)
+        if v is not None:
+            groups[key(r)].append(v)
+    return {k: statistics.median(v) for k, v in groups.items()}
+
+
 def save(fig, name):
     path = os.path.join(OUT, name)
     fig.savefig(path)
@@ -79,12 +90,11 @@ def exp1():
     rs = [r for r in rows("exp1.jsonl") if not r.get("label", "").startswith("prelim")]
     if not rs:
         return
-    last = latest_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])))
-    last.pop("metricsdb_nofsync", None)
-    vals = {k: v["bytes_per_sample"] for k, v in last.items()}
+    vals = median_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])), lambda r: r["bytes_per_sample"])
+    vals.pop("metricsdb_nofsync", None)
     vals["raw"] = 16
-    bar_chart(vals, "Bytes per sample on disk, standard benchmark (TSBS DevOps, 87.3M samples)",
-              "bytes per sample (lower is better)", "bytes_per_sample.png", lambda v: f"{v:.2f}")
+    bar_chart(vals, "Bytes per sample on disk, standard benchmark (TSBS DevOps, 87.3M samples), median of runs",
+              "bytes per sample (lower is better)", "bytes_per_sample.png", lambda v: f"{v:.3f}")
 
 
 def exp2():
@@ -92,9 +102,8 @@ def exp2():
     if not rs:
         return
     rs = [r for r in rs if r["db"] != "metricsdb-cluster"]
-    last = latest_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])))
-    vals = {k: v["samples_per_s"] / 1000 for k, v in last.items()}
-    bar_chart(vals, "Ingest throughput, same loader and data, one database at a time",
+    vals = median_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])), lambda r: r["samples_per_s"] / 1000)
+    bar_chart(vals, "Ingest throughput, same loader and data, one database at a time, median of 4 runs",
               "thousand samples per second (higher is better)", "ingest_throughput.png", lambda v: f"{v:,.0f}k")
 
 
@@ -107,19 +116,19 @@ def exp3():
     rs = rows("exp3.jsonl")
     if not rs:
         return
-    last = latest_by(rs, lambda r: (DBKEY.get(r["db"], r["db"]), r["query_type"]))
-    dbs = [d for d in ORDER if any(k[0] == d for k in last)]
-    types = [t for t in TYPE_ORDER if any(k[1] == t for k in last)]
+    p50 = median_by(rs, lambda r: (DBKEY.get(r["db"], r["db"]), r["query_type"]), lambda r: r["latency_ms"].get("p50"))
+    dbs = [d for d in ORDER if any(k[0] == d for k in p50)]
+    types = [t for t in TYPE_ORDER if any(k[1] == t for k in p50)]
     fig, ax = plt.subplots(figsize=(8, 0.42 * len(types) * len(dbs) / 2 + 1.6))
     h = 0.8 / len(dbs)
     for i, d in enumerate(dbs):
         ys = [len(types) - 1 - j + (len(dbs) / 2 - i - 0.5) * h for j in range(len(types))]
-        xs = [last.get((d, t), {}).get("latency_ms", {}).get("p50", 0) for t in types]
+        xs = [p50.get((d, t), 0) for t in types]
         ax.barh(ys, xs, height=h * 0.9, color=COLOR[d], label=NAME[d])
     ax.set_yticks(range(len(types))[::-1], types)
     ax.set_xscale("log")
     ax.set_xlabel("median latency, ms (log scale, lower is better)")
-    ax.set_title("Latency per benchmark query type", loc="left", fontsize=11)
+    ax.set_title("Median latency per benchmark query type (median of 2 rounds)", loc="left", fontsize=11)
     ax.grid(axis="y", visible=False)
     ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.45, -0.12), ncol=3)
     save(fig, "query_latency.png")

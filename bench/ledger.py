@@ -94,6 +94,15 @@ if e1:
         w(f"| {NAME.get(db, db)} | {len(rs)} | {med([r['bytes_on_disk'] for r in rs])} | {med(bps, '{:.3f}')} | "
           f"{med([16 / b for b in bps], '{:.1f}')} |")
     w("")
+    steps = rows("exp1_encoding_steps.jsonl")
+    if steps:
+        w("MetricsDB's chunk encodings, step by step (`results/exp1_encoding_steps.jsonl`; dry runs, and size does not depend on load):")
+        w("")
+        w("| encoding in blocks | raw chunk bytes per sample | rollup bytes | total bytes per sample on disk |")
+        w("|---|---|---|---|")
+        for r in steps:
+            w(f"| {r['encoding']} | {r['chunk_bytes_per_sample']} | {r['block_rollup_bytes']:,} | {r['bytes_per_sample']} |")
+        w("")
     mdb = [r for r in e1 if r["db"] == "metricsdb"]
     if mdb and "detail" in mdb[-1]:
         w(f"MetricsDB breakdown (last run): `{mdb[-1]['detail'][:600]}`")
@@ -185,14 +194,14 @@ if e5:
       "query every 250 ms counts the series it can see. Afterwards hints drain, anti-entropy runs twice, and every "
       "acknowledged sample is checked bit for bit through the router and on each of its replicas.")
     w("")
-    w("| run | samples acked | lost | writes refused on first try | queries during outage: complete / partial / error | fewest series visible | replicas missing samples before repair | after repair | repair: ranges mismatched, samples written |")
-    w("|---|---|---|---|---|---|---|---|---|")
+    w("| run | started | samples acked | lost | writes refused on first try | queries during outage: complete / partial / error | fewest series visible | replicas missing samples before repair | after repair | repair: ranges mismatched, samples written |")
+    w("|---|---|---|---|---|---|---|---|---|---|")
     for r in e5:
         ps = r["probe_summary"]
         before = sum(x["missing"] for x in r["replicas_before_repair"])
         after = sum(x["missing"] for x in r["replicas_after_repair"])
         rp = r["repair_pass_1"]
-        w(f"| {r['label']} | {r['samples_acked']:,} | {r['samples_lost']} | {r['ticks_failed_first_try']} of {r['ticks_sent']} ticks | "
+        w(f"| {r['label']} | {r['ts'][11:16]} | {r['samples_acked']:,} | {r['samples_lost']} | {r['ticks_failed_first_try']} of {r['ticks_sent']} ticks | "
           f"{ps['complete_during_outage']} / {ps['partial_during_outage']} / {ps['error_during_outage']} | "
           f"{ps['min_visible_series_during_outage']} of {r['series']} | {before:,} | {after:,} | "
           f"{rp.get('rangesMismatched')}, {rp.get('samplesWritten'):,} |")
@@ -247,15 +256,65 @@ if jm:
             w(f"| {r['benchmark']} | {params} | {r['score']:.2f} ± {r.get('error', 0):.2f} | {r['unit']} | `{f}` |")
     w("")
 
-# ---------------------------------------------------------------- other
-for name, title in [("rollups.jsonl", "Rollups for long ranges"), ("query_protection.jsonl", "Query protection")]:
-    rs = rows(name)
-    if rs:
-        w(f"## {title} (`results/{name}`)")
-        w("")
-        for r in rs:
-            w("- " + ", ".join(f"{k}: {v}" for k, v in r.items() if k not in ("machine",)))
-        w("")
+# ---------------------------------------------------------------- rollups
+ru = rows("rollups.jsonl")
+if ru:
+    w("## Rollups for long ranges (`results/rollups.jsonl`)")
+    w("")
+    w("24 hours at a 1-hour step on the loaded benchmark day, the same query with rollups forced off and on (median "
+      "of 20 runs after 5 warm-ups). Answers compared point by point.")
+    w("")
+    w("| query | raw p50 ms | rollup p50 ms | speedup | samples decoded, raw | buckets and samples read, rollup | same series and points | largest relative difference |")
+    w("|---|---|---|---|---|---|---|---|")
+    for r in ru:
+        w(f"| `{r['promql']}` | {r['raw']['p50_ms']} | {r['rollup']['p50_ms']} | {r['speedup']}x | {r['raw']['samples_loaded']:,} | "
+          f"{r['rollup']['samples_loaded']:,} | {r['same_series_and_points']} | {r['max_relative_difference']:.1e} |")
+    w("")
+    w(f"Rollup bytes on disk: {ru[-1]['rollup_bytes']:,} next to {ru[-1]['raw_chunk_bytes']:,} bytes of raw chunks "
+      f"({100 * ru[-1]['rollup_bytes'] / ru[-1]['raw_chunk_bytes']:.0f}%). Host CPU {ru[-1]['host_cpu_pct']:.0f}% during the run.")
+    w("")
+
+# ---------------------------------------------------------------- other files
+ab = rows("ingest_ab_rotation.jsonl")
+if ab:
+    r = ab[-1]
+    w("## An ingest idea that was not adopted (`results/ingest_ab_rotation.jsonl`)")
+    w("")
+    w(f"{r['question']} Data: {r['data']}. Committed code: "
+      + ", ".join(f"{x['samples_per_s']:,}/s at {x['host_cpu_pct']}% host CPU" for x in r["A_committed"])
+      + ". With the change: " + ", ".join(f"{x['samples_per_s']:,}/s at {x['host_cpu_pct']}%" for x in r["B_random_offset"])
+      + f". Verdict: {r['verdict']}.")
+    w("")
+sup = sorted(f for f in os.listdir(RES) if "_v1" in f or "_v2" in f) if os.path.isdir(RES) else []
+if sup:
+    w("## Superseded rows")
+    w("")
+    why = {
+        "exp2_v1_cluster.jsonl": "the first cluster ingest (31,287 samples/s), before the router cached each series' ring hash and encoded labels",
+        "exp3_v1_metricsdb_before_edge_rollups.jsonl": "MetricsDB's query latencies before windows used rollups with raw edges",
+        "exp4_v1.jsonl": "the answer diff before that change: also 1,100 queries and 0 mismatches",
+        "exp5_v1.jsonl": "the first exp5 set at 100% host CPU, before the health-probe damping (bug 13)",
+        "exp5_timeline_v1.jsonl": "its timeline",
+        "rollups_v1.jsonl": "the rollup experiment before rollups answered unaligned windows",
+        "rollups_v2_empty_edge_decode.jsonl": "the rollup experiment with bug 15",
+    }
+    w("Runs made before a change that alters what they measure are kept, not deleted. The tables above use only the "
+      "current files; in the exp5 table the 20:27 to 20:31 rows also predate the probe damping.")
+    w("")
+    for f in sup:
+        w(f"- `results/{f}`: {why.get(f, 'superseded, see BUG_LOG.md')}")
+    w("")
+w("## From the test suite")
+w("")
+w("- Crash recovery (`CrashRecoveryTest`): a child JVM writing from four threads is SIGKILLed at a random moment, three "
+  "times per try, six tries: every acknowledged sample read back bit for bit after each of the 18 kills. Runs in CI.")
+w("- Query protection (`HttpApiTest`): a query selecting more series than `metricsdb.query.max-series` gets a 422 naming "
+  "the limit; one loading more than `metricsdb.query.max-samples` gets a 422; one over its timeout gets a 503 "
+  "\"query timed out\"; a write that would push a node past `metricsdb.storage.max-series` gets a 422 \"cardinality "
+  "limit reached\" and the existing series keep ingesting. Runs in CI.")
+w("- VictoriaMetrics parity in CI (`VictoriaMetricsParityIT`): 36 benchmark-shaped queries against a VictoriaMetrics "
+  "container on generated data, 0 mismatches allowed.")
+w("")
 
 open(OUT, "w").write("\n".join(out) + "\n")
 print("wrote", OUT, len(out), "lines")

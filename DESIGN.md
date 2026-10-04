@@ -69,6 +69,17 @@ leading/trailing-zero window that is reused while it fits. Metrics scraped at a 
 have delta-of-delta 0 almost always, so a timestamp costs one bit; slowly changing values share
 most of their high bits, so the XOR is short.
 
+**Integer chunks.** Many metrics are whole numbers stored as doubles: counters, byte counts,
+percentages rounded by the exporter. Their XOR is poor (a counter that grows by 50 a step
+changes many mantissa bits), so when a head chunk moves into a block and every value in it is an
+exact integer (the round trip through `long` keeps the same bits, which rules out -0.0, NaN and
+fractions), the chunk is re-encoded with the same timestamp scheme and integer values: either the
+difference from the previous value or the difference of differences, whichever comes out smaller
+for that chunk (deltas suit gauges, delta-of-deltas suit counters), in 1, 6, 11, 20, 37 or 69-bit
+buckets. Two header bits say which. On the benchmark the raw chunks took 1.46 bytes per sample
+with Gorilla alone, 1.21 with integer deltas, and 1.01 choosing per chunk
+(`results/exp1_encoding_steps.jsonl`). Head chunks stay Gorilla because they must stay appendable.
+
 **Head to block.** A chunk is sealed at 120 samples or when a sample crosses a block-range
 boundary, so every chunk falls inside one two-hour range and moves to a block without being
 re-encoded (unless late samples landed in that range, in which case it is merged and
@@ -178,7 +189,11 @@ dashboard in `deploy/` reads MetricsDB's own metrics back out of MetricsDB.
 
 ## What it does not do
 
-No multi-tenancy, authentication, or TLS. No rebalancing when nodes join or leave (the ring is
+No backfill: a sample older than the head's lower bound (the end of the newest block) is refused,
+so loading days-old data into a node that is already taking live data loses whatever arrives
+after the old range was cut into a block (the Grafana demo loads its old data first for this
+reason). Prometheus has the same rule and a separate backfill tool. No multi-tenancy,
+authentication, or TLS. No rebalancing when nodes join or leave (the ring is
 static configuration). The router is a single process (it can be run as several, but hints are
 per router). Exemplars, native histograms and remote read are not implemented. The label index
 is in memory, so the series count per node is bounded by heap.
