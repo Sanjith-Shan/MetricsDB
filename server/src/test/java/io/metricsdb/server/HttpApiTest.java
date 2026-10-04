@@ -88,6 +88,15 @@ class HttpApiTest {
         ResponseEntity<String> fine = query("sum(max_over_time(cpu_usage_user{hostname=~'host_1.*'}[1h]))", T0, T0 + 3600, 60);
         assertEquals(200, fine.getStatusCode().value(), fine.getBody());
 
+        // a selector with two matchers must reach the server whole (bug 7)
+        ResponseEntity<String> exported = http.getForEntity("/api/v1/export?match[]={m}", String.class,
+                "{__name__=\"cpu_usage_user\",hostname=\"host_1\"}");
+        assertEquals(200, exported.getStatusCode().value(), exported.getBody());
+        assertEquals(1, exported.getBody().lines().count(), exported.getBody());
+        ResponseEntity<String> series = http.getForEntity("/api/v1/series?match[]={m}", String.class,
+                "{__name__=\"cpu_usage_user\",hostname=~\"host_1|host_2\"}");
+        assertTrue(series.getBody().contains("host_2") && !series.getBody().contains("host_3"), series.getBody());
+
         // timeout: a 1 ms budget on a heavy query
         ResponseEntity<String> slow = http.getForEntity("/api/v1/query_range?query={q}&start={s}&end={e}&step=10&timeout=1ms",
                 String.class, "sum(rate(cpu_usage_user{hostname=~'host_1.*'}[5m]))", T0, T0 + 3600);

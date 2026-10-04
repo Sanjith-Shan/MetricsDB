@@ -270,11 +270,13 @@ public final class XorChunk {
         }
 
         private long readDod() {
-            if (!r.readBit()) return 0;
-            if (!r.readBit()) return signExtend(r.readBits(14), 14);
-            if (!r.readBit()) return signExtend(r.readBits(17), 17);
-            if (!r.readBit()) return signExtend(r.readBits(20), 20);
-            return r.readBits(64);
+            return switch (r.readUnary(4)) {
+                case 0 -> 0;
+                case 1 -> signExtend(r.readBits(14), 14);
+                case 2 -> signExtend(r.readBits(17), 17);
+                case 3 -> signExtend(r.readBits(20), 20);
+                default -> r.readBits(64);
+            };
         }
 
         private static long signExtend(long v, int bits) {
@@ -282,17 +284,20 @@ public final class XorChunk {
         }
 
         private long readIntDelta() {
-            if (!r.readBit()) return 0;
-            if (!r.readBit()) return signExtend(r.readBits(4), 4);
-            if (!r.readBit()) return signExtend(r.readBits(8), 8);
-            if (!r.readBit()) return signExtend(r.readBits(16), 16);
-            if (!r.readBit()) return signExtend(r.readBits(32), 32);
-            return r.readBits(64);
+            return switch (r.readUnary(5)) {
+                case 0 -> 0;
+                case 1 -> signExtend(r.readBits(4), 4);
+                case 2 -> signExtend(r.readBits(8), 8);
+                case 3 -> signExtend(r.readBits(16), 16);
+                case 4 -> signExtend(r.readBits(32), 32);
+                default -> r.readBits(64);
+            };
         }
 
         private void readXor() {
-            if (!r.readBit()) return;
-            if (r.readBit()) {
+            int c = r.readUnary(2);
+            if (c == 0) return;
+            if (c == 2) {
                 leading = (int) r.readBits(5);
                 int sig = (int) r.readBits(6);
                 if (sig == 0) sig = 64;

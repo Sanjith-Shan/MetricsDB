@@ -74,6 +74,19 @@ public class QueryController {
         return ResponseEntity.ok(Json.result(r, c.warnings(), c.isPartial()));
     }
 
+    /**
+     * Raw {@code match[]} values. Binding them to a List would let Spring split a single value on
+     * commas, which cuts a selector like {@code {a="x",b="y"}} in half.
+     */
+    private static List<String> matches(jakarta.servlet.http.HttpServletRequest req, boolean required) {
+        String[] v = req.getParameterValues("match[]");
+        if (v == null || v.length == 0) {
+            if (required) throw new ParseException("match[] is required", -1);
+            return null;
+        }
+        return List.of(v);
+    }
+
     private List<SeriesChunks> selectAll(List<String> match, String start, String end, QueryContext c) {
         long mint = start == null ? Long.MIN_VALUE : parseTime(start);
         long maxt = end == null ? Long.MAX_VALUE : parseTime(end);
@@ -87,8 +100,9 @@ public class QueryController {
     }
 
     @RequestMapping(value = "/api/v1/series", method = {RequestMethod.GET, RequestMethod.POST}, produces = MediaType.APPLICATION_JSON_VALUE)
-    public String series(@RequestParam("match[]") List<String> match, @RequestParam(required = false) String start,
+    public String series(jakarta.servlet.http.HttpServletRequest req, @RequestParam(required = false) String start,
                          @RequestParam(required = false) String end) {
+        List<String> match = matches(req, true);
         QueryContext c = ctx(null);
         TreeSet<Labels> seen = new TreeSet<>();
         for (SeriesChunks sc : selectAll(match, start, end, c)) seen.add(sc.labels());
@@ -103,8 +117,9 @@ public class QueryController {
     }
 
     @RequestMapping(value = "/api/v1/labels", method = {RequestMethod.GET, RequestMethod.POST}, produces = MediaType.APPLICATION_JSON_VALUE)
-    public String labels(@RequestParam(value = "match[]", required = false) List<String> match,
+    public String labels(jakarta.servlet.http.HttpServletRequest req,
                          @RequestParam(required = false) String start, @RequestParam(required = false) String end) {
+        List<String> match = matches(req, false);
         if (match != null && !match.isEmpty() || node.tsdb() == null) {
             TreeSet<String> names = new TreeSet<>();
             List<String> ms = match == null || match.isEmpty() ? List.of("{__name__=~\".+\"}") : match;
@@ -115,8 +130,9 @@ public class QueryController {
     }
 
     @GetMapping(value = "/api/v1/label/{name}/values", produces = MediaType.APPLICATION_JSON_VALUE)
-    public String labelValues(@PathVariable String name, @RequestParam(value = "match[]", required = false) List<String> match,
+    public String labelValues(@PathVariable String name, jakarta.servlet.http.HttpServletRequest req,
                               @RequestParam(required = false) String start, @RequestParam(required = false) String end) {
+        List<String> match = matches(req, false);
         if (match != null && !match.isEmpty() || node.tsdb() == null) {
             TreeSet<String> vals = new TreeSet<>();
             List<String> ms = match == null || match.isEmpty() ? List.of("{" + name + "=~\".+\"}") : match;
@@ -131,8 +147,9 @@ public class QueryController {
 
     /** VictoriaMetrics-compatible export: one JSON object per series with raw samples. */
     @RequestMapping(value = "/api/v1/export", method = {RequestMethod.GET, RequestMethod.POST}, produces = "application/stream+json")
-    public String export(@RequestParam("match[]") List<String> match, @RequestParam(required = false) String start,
+    public String export(jakarta.servlet.http.HttpServletRequest req, @RequestParam(required = false) String start,
                          @RequestParam(required = false) String end) {
+        List<String> match = matches(req, true);
         QueryContext c = ctx(null);
         StringBuilder sb = new StringBuilder();
         long mint = start == null ? Long.MIN_VALUE : parseTime(start);

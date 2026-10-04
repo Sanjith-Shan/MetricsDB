@@ -186,8 +186,7 @@ public final class Engine {
         long mint = c.start - vs.offsetMs() - opt.lookbackMs + 1;
         long maxt = c.end() - vs.offsetMs();
         List<SeriesChunks> sel = storage.select(vs.matchers(), mint, maxt, c.qctx);
-        List<StepSeries> out = new ArrayList<>(sel.size());
-        for (SeriesChunks sc : sel) {
+        return new Vector(parallelMap(sel, sc -> {
             SampleArray sa = SampleArray.decode(sc.chunks(), mint, maxt, c.qctx);
             StepSeries s = new StepSeries(sc.labels(), c.n);
             int j = 0;
@@ -199,9 +198,26 @@ public final class Engine {
                     s.has[i] = true;
                 }
             }
-            out.add(s);
+            return s;
+        }));
+    }
+
+    /** Per-series work runs on all cores once a query selects enough series to be worth it. */
+    private static <T, R> List<R> parallelMap(List<T> in, java.util.function.Function<T, R> f) {
+        int n = in.size();
+        if (n < 32) {
+            List<R> out = new ArrayList<>(n);
+            for (T t : in) out.add(f.apply(t));
+            return out;
         }
-        return new Vector(out);
+        Object[] res = new Object[n];
+        java.util.stream.IntStream.range(0, n).parallel().forEach(i -> res[i] = f.apply(in.get(i)));
+        List<R> out = new ArrayList<>(n);
+        for (Object o : res) {
+            @SuppressWarnings("unchecked") R r = (R) o;
+            out.add(r);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ functions
@@ -293,8 +309,7 @@ public final class Engine {
         long maxt = c.end() - off;
         List<SeriesChunks> sel = storage.select(ms.sel().matchers(), mint, maxt, c.qctx);
         boolean keepName = Functions.KEEP_NAME.contains(f);
-        List<StepSeries> out = new ArrayList<>(sel.size());
-        for (SeriesChunks sc : sel) {
+        return new Vector(parallelMap(sel, sc -> {
             SampleArray sa = SampleArray.decode(sc.chunks(), mint, maxt, c.qctx);
             StepSeries s = new StepSeries(keepName ? sc.labels() : sc.labels().withoutName(), c.n);
             int lo = 0, hi = 0;
@@ -308,9 +323,8 @@ public final class Engine {
                 s.v[i] = r;
                 s.has[i] = true;
             }
-            out.add(s);
-        }
-        return new Vector(out);
+            return s;
+        }));
     }
 
     private static double windowValue(String f, SampleArray sa, int lo, int hi, long rangeStart, long rangeEnd, long w) {
