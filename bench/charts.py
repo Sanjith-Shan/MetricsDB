@@ -19,11 +19,11 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "docs"
 os.makedirs(OUT, exist_ok=True)
 
 # validated categorical slots 1-3 (blue, orange, aqua), then neutral ink
-COLOR = {"metricsdb": "#2a78d6", "victoriametrics": "#eb6834", "influxdb": "#1baf7a", "raw": "#8a8985"}
-NAME = {"metricsdb": "MetricsDB", "victoriametrics": "VictoriaMetrics", "influxdb": "InfluxDB", "raw": "Uncompressed"}
+COLOR = {"metricsdb_nofsync": "#2a78d6", "metricsdb": "#2a78d6", "victoriametrics": "#eb6834", "influxdb": "#1baf7a", "raw": "#8a8985"}
+NAME = {"metricsdb_nofsync": "MetricsDB, fsync off", "metricsdb": "MetricsDB", "victoriametrics": "VictoriaMetrics", "influxdb": "InfluxDB", "raw": "Uncompressed"}
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 ORDER = ["metricsdb", "victoriametrics", "influxdb"]
-DBKEY = {"metricsdb": "metricsdb", "vm": "victoriametrics", "victoriametrics": "victoriametrics",
+DBKEY = {"metricsdb-fsync-off": "metricsdb_nofsync", "metricsdb": "metricsdb", "vm": "victoriametrics", "victoriametrics": "victoriametrics",
          "influx": "influxdb", "influxdb": "influxdb"}
 
 plt.rcParams.update({
@@ -57,10 +57,14 @@ def save(fig, name):
 
 def bar_chart(values, title, xlabel, fname, fmt):
     """Horizontal bars, one per database, value labelled at the bar end."""
-    keys = [k for k in ORDER + ["raw"] if k in values]
+    keys = [k for k in ["metricsdb", "metricsdb_nofsync", "victoriametrics", "influxdb", "raw"] if k in values]
     fig, ax = plt.subplots(figsize=(7, 0.55 * len(keys) + 1.1))
     ys = range(len(keys))[::-1]
-    ax.barh(list(ys), [values[k] for k in keys], color=[COLOR[k] for k in keys], height=0.55)
+    bars = ax.barh(list(ys), [values[k] for k in keys], color=[COLOR[k] for k in keys], height=0.55)
+    for b, k in zip(bars, keys):
+        if k == "metricsdb_nofsync":
+            b.set_hatch("///")  # same entity, variant: texture, not a new colour
+            b.set_edgecolor("white")
     ax.set_yticks(list(ys), [NAME[k] for k in keys])
     for y, k in zip(ys, keys):
         ax.text(values[k], y, "  " + fmt(values[k]), va="center", color=INK)
@@ -75,7 +79,8 @@ def exp1():
     rs = [r for r in rows("exp1.jsonl") if not r.get("label", "").startswith("prelim")]
     if not rs:
         return
-    last = latest_by(rs, lambda r: DBKEY.get(r["db"], r["db"]))
+    last = latest_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])))
+    last.pop("metricsdb_nofsync", None)
     vals = {k: v["bytes_per_sample"] for k, v in last.items()}
     vals["raw"] = 16
     bar_chart(vals, "Bytes per sample on disk, standard benchmark (TSBS DevOps, 87.3M samples)",
@@ -86,7 +91,8 @@ def exp2():
     rs = rows("exp2.jsonl")
     if not rs:
         return
-    last = latest_by(rs, lambda r: DBKEY.get(r["db"], r["db"]))
+    rs = [r for r in rs if r["db"] != "metricsdb-cluster"]
+    last = latest_by(rs, lambda r: DBKEY.get(r.get("label", r["db"]), DBKEY.get(r["db"], r["db"])))
     vals = {k: v["samples_per_s"] / 1000 for k, v in last.items()}
     bar_chart(vals, "Ingest throughput, same loader and data, one database at a time",
               "thousand samples per second (higher is better)", "ingest_throughput.png", lambda v: f"{v:,.0f}k")

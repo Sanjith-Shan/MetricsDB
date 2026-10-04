@@ -19,7 +19,8 @@ HOST_CPU_PCT=$cpu_before $BENCH load --file $file --url "$url" --workers $worker
 case $db in
   metricsdb) curl -s -XPOST localhost:9201/admin/flush >/dev/null; sleep 5
              bytes=$(du -sb $W/run/metricsdb/data | cut -f1)
-             detail=$(curl -s localhost:9201/admin/stats | sed 's/"blockList".*//') ;;
+             detail="$(curl -s localhost:9201/admin/stats | sed 's/,"blockList".*/}/') wal fsync: $(curl -s localhost:9201/metrics | grep -E '^metricsdb_wal_fsync_seconds_(count|sum|max)' | tr '
+' ' ')" ;;
   vm) curl -s localhost:8428/internal/force_flush; sleep 5
       curl -s "localhost:8428/internal/force_merge?partition_prefix=2026_10"; sleep 60
       bytes=$(docker exec mdb-vm du -sb /victoria-metrics-data | cut -f1)

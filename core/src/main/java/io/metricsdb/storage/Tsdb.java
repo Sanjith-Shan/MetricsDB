@@ -179,9 +179,16 @@ public final class Tsdb implements Queryable, Closeable {
     }
 
     /** Returns the series, creating it if needed; null when the cardinality limit refuses it. */
+    private record SeriesRef(Tsdb db, MemSeries s) {}
+
     private MemSeries getOrCreate(Labels l, boolean enforceLimit, boolean log) {
+        // parsers hand out the same Labels instance for a repeated series: remember its series on it
+        if (l.seriesRef instanceof SeriesRef r && r.db == this) return r.s;
         MemSeries s = byLabels.get(l);
-        if (s != null) return s;
+        if (s != null) {
+            l.seriesRef = new SeriesRef(this, s);
+            return s;
+        }
         synchronized (createLock) {
             s = byLabels.get(l);
             if (s != null) return s;

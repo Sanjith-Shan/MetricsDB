@@ -12,8 +12,14 @@ for r in $(seq 1 $REPEAT); do
   KEEP=1 $REPO/bench/scripts/exp_ingest.sh metricsdb metricsdb
   wait_idle
   HOST_CPU_PCT=$(host_cpu) $BENCH querybench --url http://localhost:9201 --db metricsdb --queries $QV --out $RESULTS/exp3.jsonl
+  $REPO/bench/scripts/exp_rollups.sh
   KEEP=1 $db stop metricsdb   # data kept for the diff
 done
+# MetricsDB with the WAL fsync off, which is how VictoriaMetrics acknowledges by default (it flushes
+# buffered data every few seconds), as a second, like-for-like ingest row
+wait_idle
+MDB_ARGS="--metricsdb.storage.wal-sync=none" $REPO/bench/scripts/exp_ingest.sh metricsdb metricsdb-fsync-off
+KEEP=1 $REPO/bench/scripts/db.sh stop metricsdb
 for r in $(seq 1 $REPEAT); do
   wait_idle
   KEEP=1 $REPO/bench/scripts/exp_ingest.sh vm victoriametrics

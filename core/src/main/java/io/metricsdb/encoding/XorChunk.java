@@ -20,7 +20,9 @@ public final class XorChunk {
 
     /** High bit of the 2-byte header: values are integer deltas instead of XORed floats. */
     public static final int INT_FLAG = 0x8000;
-    public static final int MAX_COUNT = 0x7fff;
+    /** Second header bit (integer chunks): values store delta-of-deltas, which suits counters. */
+    public static final int DOD_FLAG = 0x4000;
+    public static final int MAX_COUNT = 0x3fff;
 
     public static int count(ByteBuffer b, int offset) {
         return (((b.get(offset) & 0xff) << 8) | (b.get(offset + 1) & 0xff)) & MAX_COUNT;
@@ -47,7 +49,9 @@ public final class XorChunk {
      */
     public static byte[] encodeBest(long[] ts, double[] vs, int from, int to) {
         for (int i = from; i < to; i++) if (!exactLong(vs[i])) return encode(ts, vs, from, to);
-        return encodeInt(ts, vs, from, to);
+        byte[] delta = encodeInt(ts, vs, from, to, false);
+        byte[] dod = encodeInt(ts, vs, from, to, true);
+        return dod.length < delta.length ? dod : delta;
     }
 
     /** True when v converts to a long and back with the same bits (rules out -0.0, NaN, fractions). */
@@ -60,14 +64,16 @@ public final class XorChunk {
     /**
      * Integer variant: timestamps exactly as in Gorilla; values as the difference from the
      * previous integer in 1, 2+4, 3+8, 4+16, 5+32 or 5+64 bits. A gauge that moves by a few units
-     * per sample costs 6 bits instead of the 13 or more an XOR with a new window takes.
+     * per sample costs 6 bits instead of the 13 or more an XOR with a new window takes. With
+     * {@code dodValues} the values store the change of the difference instead, so a counter that
+     * grows by about the same amount each interval costs the same few bits as a flat gauge.
      */
-    static byte[] encodeInt(long[] ts, double[] vs, int from, int to) {
+    static byte[] encodeInt(long[] ts, double[] vs, int from, int to, boolean dodValues) {
         int n = to - from;
         if (n > MAX_COUNT) throw new IllegalStateException("chunk over " + MAX_COUNT + " samples");
         BitWriter w = new BitWriter(16 + n);
-        w.writeBits(INT_FLAG | n, 16);
-        long prevT = 0, prevDelta = 0, prevV = 0;
+        w.writeBits(INT_FLAG | (dodValues ? DOD_FLAG : 0) | n, 16);
+        long prevT = 0, prevDelta = 0, prevV = 0, prevD = 0;
         for (int i = from; i < to; i++) {
             long t = ts[i], v = (long) vs[i];
             if (i == from) {
@@ -78,6 +84,11 @@ public final class XorChunk {
                 writeDod(w, i == from + 1 ? delta : delta - prevDelta);
                 prevDelta = delta;
                 long d = v - prevV;
+                if (dodValues) {
+                    long dd = i == from + 1 ? d : d - prevD;
+                    prevD = d;
+                    d = dd;
+                }
                 if (d == 0) w.writeBit(false);
                 else if (fits(d, 4)) { w.writeBits(0b10, 2); w.writeBits(d, 4); }
                 else if (fits(d, 8)) { w.writeBits(0b110, 3); w.writeBits(d, 8); }
@@ -216,11 +227,13 @@ public final class XorChunk {
         private long vBits;
         private int leading, trailing;
         private final boolean integer;
-        private long iv;
+        private long iv, ivDelta;
+        private final boolean dodValues;
 
         public Iterator(ByteBuffer b, int offset, int length) {
             this.total = count(b, offset);
             this.integer = isInteger(b, offset);
+            this.dodValues = integer && (b.get(offset) & 0x40) != 0;
             this.r = new BitReader(b, offset + HEADER_BYTES, length - HEADER_BYTES);
         }
 
@@ -241,7 +254,12 @@ public final class XorChunk {
                 delta = read == 1 ? dod : delta + dod;
                 t += delta;
                 if (integer) {
-                    iv += readIntDelta();
+                    long x = readIntDelta();
+                    if (dodValues) {
+                        ivDelta = read == 1 ? x : ivDelta + x;
+                        x = ivDelta;
+                    }
+                    iv += x;
                     vBits = Double.doubleToRawLongBits((double) iv);
                 } else {
                     readXor();

@@ -122,11 +122,13 @@ public final class Workload {
         String match = URLEncoder.encode("{__name__=\"exp_value\",run=\"" + run + "\"}", StandardCharsets.UTF_8);
         HttpResponse<String> r = Queries.HTTP.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/export?match%5B%5D=" + match))
                 .timeout(Duration.ofMinutes(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (r.statusCode() != 200) throw new IllegalStateException("export from " + base + " failed: " + r.statusCode() + " " + r.body());
         long[][] found = new long[series][];
         double[][] vals = new double[series][];
         for (String line : r.body().split("\n")) {
             if (line.isBlank()) continue;
             JsonNode n = Env.JSON.readTree(line);
+            if (!n.has("metric") || !n.get("metric").has("series")) throw new IllegalStateException("unexpected export line from " + base + ": " + line);
             int s = Integer.parseInt(n.get("metric").get("series").asText().substring(1));
             JsonNode ts = n.get("timestamps"), vs = n.get("values");
             found[s] = new long[ts.size()];
