@@ -94,7 +94,8 @@ The bugs found on the way, with what found each one, are in [`BUG_LOG.md`](BUG_L
 
 ## Run it
 
-Needs JDK 21 and Docker. The benchmark runs need TSBS (Go) and use about 7 GB of scratch disk
+Needs JDK 21 and Docker. The benchmark runs need TSBS (Go; `bench/scripts/setup_tools.sh` and
+`bench/scripts/gen_tsbs.sh` set it up) and use about 8 GB of scratch disk
 outside the repo (`$HOME/metricsdb-work`).
 
 ```bash
