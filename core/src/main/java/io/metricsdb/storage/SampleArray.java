@@ -44,6 +44,7 @@ public final class SampleArray {
 
     /** Like {@link #decode} for chunks already sorted by {@code minT}. */
     public static SampleArray decodeSorted(Chunk[] cs, long mint, long maxt, QueryContext ctx) {
+        if (mint > maxt) return new SampleArray(0);
         int est = 0;
         boolean sorted = true;
         for (int i = 0; i < cs.length; i++) {

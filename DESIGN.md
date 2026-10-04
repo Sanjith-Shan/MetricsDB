@@ -87,10 +87,16 @@ drops a block's raw chunks while keeping its rollups when rollups are kept longe
 A bucket ending at `e` covers `(e - 5m, e]`, the same left-open convention as PromQL range
 windows, so `max_over_time(x[1h])` at a bucket-aligned time is exactly the max of twelve
 buckets. The block's last bucket needs the sample at the range's end, which is still in the
-head when the block is cut. The engine uses rollups for `min/max/sum/count/avg/last_over_time`
-when the window, step and start are multiples of five minutes and the step is at least an hour
-(or when asked), and the result equals the raw evaluation (a test checks this). `rate` always
-reads raw data.
+head when the block is cut (the very first block also keeps the bucket ending at its start).
+
+Windows need not line up with buckets. A window `(t - w, t]` splits exactly into a raw slice
+`(t - w, a]`, whole buckets ending in `(a, b]`, and a raw slice `(b, t]`, where `a` is `t - w`
+rounded up and `b` is `t` rounded down to five minutes. Only the two edge slices are decoded from
+raw chunks, so a one-hour window reads 12 buckets and roughly two partial chunks instead of 360
+samples. The engine takes this path for `min/max/sum/count/avg/last_over_time` with windows of
+30 minutes or more (configurable, or forced per query with `rollup=on|off`), and the answer is
+the raw evaluation's, up to float rounding in sums (tests compare the two on aligned and unaligned windows, and exp4 compares
+with VictoriaMetrics). `rate` always reads raw data.
 
 ## Index
 

@@ -460,7 +460,7 @@ public final class Engine {
                 if (a > b || rs == null) {
                     acc.addRaw(SampleArray.decodeSorted(chunks, from + 1, ts, c.qctx));
                 } else {
-                    acc.addRaw(SampleArray.decodeSorted(chunks, from + 1, a, c.qctx));
+                    if (a > from) acc.addRaw(SampleArray.decodeSorted(chunks, from + 1, a, c.qctx));
                     switch (f) {
                         case "max_over_time" -> acc.addBuckets(mx, a, b, Rollup.MAX);
                         case "min_over_time" -> acc.addBuckets(mn, a, b, Rollup.MIN);
@@ -468,7 +468,7 @@ public final class Engine {
                         case "last_over_time" -> acc.addBuckets(last, a, b, Rollup.LAST);
                         default -> { acc.addBuckets(sum, a, b, Rollup.SUM); acc.addBuckets(cnt, a, b, Rollup.COUNT); }
                     }
-                    acc.addRaw(SampleArray.decodeSorted(chunks, b + 1, ts, c.qctx));
+                    if (ts > b) acc.addRaw(SampleArray.decodeSorted(chunks, b + 1, ts, c.qctx));
                 }
                 if (!acc.any) continue;
                 s.v[i] = switch (f) {
