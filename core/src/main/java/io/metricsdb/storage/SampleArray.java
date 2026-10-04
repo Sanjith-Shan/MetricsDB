@@ -44,8 +44,11 @@ public final class SampleArray {
         }
         if (ctx != null) ctx.addSamples(est);
         SampleArray out = new SampleArray(est);
+        int[] runs = new int[cs.length + 1];
+        int nr = 0;
         for (Chunk c : cs) {
             if (!c.overlaps(mint, maxt)) continue;
+            runs[nr++] = out.n;
             XorChunk.Iterator it = c.iterator();
             while (it.next()) {
                 long ts = it.t();
@@ -54,7 +57,8 @@ public final class SampleArray {
                 out.add(ts, it.v());
             }
         }
-        if (!sorted) out.sortDedup();
+        runs[nr] = out.n;
+        if (!sorted) out.mergeRuns(runs, nr);
         else out.dedupAdjacent();
         return out;
     }
@@ -70,23 +74,49 @@ public final class SampleArray {
         n = w;
     }
 
-    /** Stable sort by timestamp, then keep the first of each run of equal timestamps. */
-    public void sortDedup() {
-        Integer[] idx = new Integer[n];
-        for (int i = 0; i < n; i++) idx[i] = i;
-        Arrays.sort(idx, (a, b) -> Long.compare(t[a], t[b]));
-        long[] nt = new long[n];
-        double[] nv = new double[n];
-        int w = 0;
-        for (int k = 0; k < n; k++) {
-            int i = idx[k];
-            if (w > 0 && nt[w - 1] == t[i]) continue;
-            nt[w] = t[i];
-            nv[w] = v[i];
-            w++;
+    /**
+     * Merges sorted runs (one per chunk, in chunk order) bottom-up. On equal timestamps the
+     * earlier run wins, so the result is the same as a stable sort followed by keep-first.
+     */
+    void mergeRuns(int[] runs, int nr) {
+        long[] st = t, dt = new long[n];
+        double[] sv = v, dv = new double[n];
+        int[] bounds = java.util.Arrays.copyOf(runs, nr + 1);
+        int count = nr;
+        while (count > 1) {
+            int[] nb = new int[(count + 1) / 2 + 1];
+            int w = 0, k = 0;
+            for (int r = 0; r < count; r += 2) {
+                nb[k++] = w;
+                int i = bounds[r], ie = bounds[r + 1];
+                if (r + 1 == count) {
+                    while (i < ie) { dt[w] = st[i]; dv[w] = sv[i]; w++; i++; }
+                    continue;
+                }
+                int j = bounds[r + 1], je = bounds[r + 2];
+                while (i < ie || j < je) {
+                    long x;
+                    double y;
+                    if (j >= je || (i < ie && st[i] <= st[j])) {
+                        x = st[i]; y = sv[i];
+                        if (j < je && st[j] == x) j++; // duplicate in the later run loses
+                        i++;
+                    } else {
+                        x = st[j]; y = sv[j]; j++;
+                    }
+                    if (w > 0 && dt[w - 1] == x && w > nb[k - 1]) continue;
+                    dt[w] = x; dv[w] = y; w++;
+                }
+            }
+            nb[k] = w;
+            bounds = nb;
+            count = k;
+            long[] tt = st; st = dt; dt = tt;
+            double[] tv = sv; sv = dv; dv = tv;
+            n = w;
         }
-        t = nt;
-        v = nv;
-        n = w;
+        t = st;
+        v = sv;
+        dedupAdjacent();
     }
 }

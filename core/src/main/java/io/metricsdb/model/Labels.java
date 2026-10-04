@@ -115,6 +115,7 @@ public final class Labels implements Comparable<Labels> {
     String[] raw() { return kv; }
 
     @Override public boolean equals(Object o) {
+        if (o == this) return true;
         return o instanceof Labels l && l.hash == hash && Arrays.equals(l.kv, kv);
     }
 

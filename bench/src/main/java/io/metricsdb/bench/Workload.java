@@ -120,7 +120,7 @@ public final class Workload {
     /** Verifies acknowledged samples through {@code base} (router or one node), optionally only series the node replicates. */
     public Check verify(String base, HashRing ring, int nodeIndex) throws Exception {
         String match = URLEncoder.encode("{__name__=\"exp_value\",run=\"" + run + "\"}", StandardCharsets.UTF_8);
-        HttpResponse<String> r = Queries.HTTP.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/export?match[]=" + match))
+        HttpResponse<String> r = Queries.HTTP.send(HttpRequest.newBuilder(URI.create(base + "/api/v1/export?match%5B%5D=" + match))
                 .timeout(Duration.ofMinutes(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
         long[][] found = new long[series][];
         double[][] vals = new double[series][];

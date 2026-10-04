@@ -76,7 +76,7 @@ public final class OooExp {
         JsonNode after = stats(url);
         // read back everything and check it against the simulation
         String match = URLEncoder.encode("{__name__=\"ooo_value\",run=\"" + run + "\"}", StandardCharsets.UTF_8);
-        HttpResponse<String> exp = Queries.HTTP.send(HttpRequest.newBuilder(URI.create(url + "/api/v1/export?match[]=" + match))
+        HttpResponse<String> exp = Queries.HTTP.send(HttpRequest.newBuilder(URI.create(url + "/api/v1/export?match%5B%5D=" + match))
                 .timeout(Duration.ofMinutes(2)).GET().build(), HttpResponse.BodyHandlers.ofString());
         Map<Long, Boolean> stored = new HashMap<>();
         for (String line : exp.body().split("\n")) {

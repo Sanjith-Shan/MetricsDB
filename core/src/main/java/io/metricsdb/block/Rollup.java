@@ -23,8 +23,8 @@ public final class Rollup {
 
     /** Aggregates samples (sorted) with timestamps in (fromExcl, toIncl] into one chunk per aggregate. */
     public static Chunk[] build(SampleArray s, long fromExcl, long toIncl, long res) {
-        XorChunk.Appender[] a = new XorChunk.Appender[AGGS];
-        for (int k = 0; k < AGGS; k++) a[k] = new XorChunk.Appender();
+        SampleArray[] a = new SampleArray[AGGS];
+        for (int k = 0; k < AGGS; k++) a[k] = new SampleArray(16);
         long cur = Long.MIN_VALUE;
         double mn = 0, mx = 0, sum = 0, last = 0;
         long cnt = 0;
@@ -48,17 +48,22 @@ public final class Rollup {
             last = v;
         }
         if (cnt > 0) emit(a, cur, mn, mx, sum, cnt, last);
-        if (a[0].count() == 0) return null;
+        if (a[0].n == 0) return null;
         Chunk[] out = new Chunk[AGGS];
-        for (int k = 0; k < AGGS; k++) out[k] = Chunk.of(a[k].minT(), a[k].maxT(), a[k].toBytes());
+        for (int k = 0; k < AGGS; k++) out[k] = encode(a[k]);
         return out;
     }
 
-    private static void emit(XorChunk.Appender[] a, long e, double mn, double mx, double sum, long cnt, double last) {
-        a[MIN].append(e, mn);
-        a[MAX].append(e, mx);
-        a[SUM].append(e, sum);
-        a[COUNT].append(e, cnt);
-        a[LAST].append(e, last);
+    /** One chunk for a whole aggregate series, integer-encoded when it can be. */
+    public static Chunk encode(SampleArray s) {
+        return Chunk.of(s.t[0], s.t[s.n - 1], XorChunk.encodeBest(s.t, s.v, 0, s.n));
+    }
+
+    private static void emit(SampleArray[] a, long e, double mn, double mx, double sum, long cnt, double last) {
+        a[MIN].add(e, mn);
+        a[MAX].add(e, mx);
+        a[SUM].add(e, sum);
+        a[COUNT].add(e, cnt);
+        a[LAST].add(e, last);
     }
 }

@@ -25,6 +25,8 @@ public final class MemSeries {
     private final ArrayList<Chunk> sealed = new ArrayList<>(2);
     private XorChunk.Appender open;
     private long openBoundary;
+    private int[] openTs;          // timestamps of the open chunk as offsets from its first, for duplicate checks
+    private boolean openTsOverflow;
     private long maxT = Long.MIN_VALUE;
     private long[] oooT;
     private double[] oooV;
@@ -48,8 +50,11 @@ public final class MemSeries {
             if (open == null || open.count() >= XorChunk.MAX_SAMPLES || t >= openBoundary) {
                 seal();
                 open = new XorChunk.Appender();
+                if (openTs == null) openTs = new int[XorChunk.MAX_SAMPLES];
                 openBoundary = Math.floorDiv(t, blockRange) * blockRange + blockRange;
             }
+            if (open.count() == 0 || t - open.minT() < Integer.MAX_VALUE) openTs[open.count()] = open.count() == 0 ? 0 : (int) (t - open.minT());
+            else openTsOverflow = true;
             open.append(t, v);
             maxT = t;
             return Result.OK;
@@ -87,7 +92,8 @@ public final class MemSeries {
             if (t >= c.minT() && t <= c.maxT()) return containsT(c.iterator(), t);
         }
         if (open != null && open.count() > 0 && t >= open.minT() && t <= open.maxT()) {
-            return containsT(new XorChunk.Iterator(open.toBytes()), t);
+            if (openTsOverflow) return containsT(new XorChunk.Iterator(open.toBytes()), t);
+            return Arrays.binarySearch(openTs, 0, open.count(), (int) (t - open.minT())) >= 0;
         }
         return false;
     }
@@ -101,6 +107,7 @@ public final class MemSeries {
     }
 
     private void seal() {
+        openTsOverflow = false;
         if (open != null && open.count() > 0) sealed.add(Chunk.of(open.minT(), open.maxT(), open.toBytes()));
         open = null;
     }

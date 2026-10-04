@@ -80,6 +80,29 @@ class XorChunkTest {
         assertFalse(it.next());
     }
 
+    @Property(tries = 500)
+    void bestEncodingRoundTripsBitExact(@ForAll("series") Series s, @ForAll boolean integerise) {
+        double[] v = s.v.clone();
+        if (integerise) for (int i = 0; i < v.length; i++) v[i] = Double.isFinite(v[i]) ? Math.rint(v[i]) : v[i];
+        byte[] bytes = XorChunk.encodeBest(s.t, v, 0, v.length);
+        XorChunk.Iterator it = new XorChunk.Iterator(bytes);
+        for (int i = 0; i < v.length; i++) {
+            assertTrue(it.next());
+            assertEquals(s.t[i], it.t());
+            assertEquals(Double.doubleToRawLongBits(v[i]), it.vBits(), "value bits " + i + " of " + v[i]);
+        }
+        assertFalse(it.next());
+    }
+
+    @Test
+    void integerEncodingIsUsedOnlyWhenExact() {
+        long[] t = {1000, 2000, 3000};
+        assertTrue((XorChunk.encodeBest(t, new double[]{1, 5, -3}, 0, 3)[0] & 0x80) != 0);
+        assertFalse((XorChunk.encodeBest(t, new double[]{1, -0.0, 2}, 0, 3)[0] & 0x80) != 0, "-0.0 must keep its sign bit");
+        assertFalse((XorChunk.encodeBest(t, new double[]{1, 0.5, 2}, 0, 3)[0] & 0x80) != 0);
+        assertFalse((XorChunk.encodeBest(t, new double[]{1, 1e300, 2}, 0, 3)[0] & 0x80) != 0);
+    }
+
     @Property(tries = 200)
     void snapshotWhileAppendingIsConsistent(@ForAll("series") Series s, @ForAll @IntRange(min = 0, max = 400) int cut) {
         XorChunk.Appender a = new XorChunk.Appender();

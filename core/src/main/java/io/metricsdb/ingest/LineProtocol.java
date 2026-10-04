@@ -5,13 +5,18 @@ import io.metricsdb.storage.WriteBatch;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * InfluxDB line protocol: {@code measurement,tag=v,... field=1.5,other=3i 1700000000000000000}.
  * Each numeric field becomes one sample of series {@code measurement_field} with the tags as
  * labels, the naming VictoriaMetrics uses, so the standard benchmark's loaders and queries work
  * unchanged. String fields are skipped. Timestamps default to nanoseconds.
+ *
+ * <p>Metrics repeat the same series line after line, so the parser caches, across requests and
+ * threads, the raw bytes of each {@code measurement,tags} prefix together with the label set it
+ * produces for every field. A repeated series costs one hash of its prefix bytes: no strings,
+ * no sorting, and the cached {@link Labels} instance makes the series lookup an identity hit.
  */
 public final class LineProtocol {
 
@@ -20,22 +25,28 @@ public final class LineProtocol {
         public String firstError;
     }
 
-    private final HashMap<Key, String> strings = new HashMap<>();
+    private static final int MAX_CACHED = 1 << 20;
+    private static final ConcurrentHashMap<Key, String> STRINGS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Key, Prefix> PREFIXES = new ConcurrentHashMap<>();
+
     private final Key probe = new Key();
 
-    /** Small per-parser string cache: tag keys and values repeat across lines. */
+    /** A byte range used as a hash key; probes point into the request body, stored keys own a copy. */
     private static final class Key {
         byte[] a;
         int off, len, hash;
 
-        void set(byte[] a, int off, int len) {
+        Key set(byte[] a, int off, int len) {
             this.a = a;
             this.off = off;
             this.len = len;
             int h = 1;
             for (int i = off; i < off + len; i++) h = 31 * h + a[i];
             this.hash = h;
+            return this;
         }
+
+        Key copy() { return new Key().set(Arrays.copyOfRange(a, off, off + len), 0, len); }
 
         @Override public int hashCode() { return hash; }
 
@@ -44,17 +55,49 @@ public final class LineProtocol {
         }
     }
 
+    /** One {@code measurement,tags} prefix: its sorted tags and the label set of each field seen. */
+    private static final class Prefix {
+        final String measurement;
+        final String[] tagKv; // sorted by name, no __name__
+        final int at;         // where __name__ goes
+        final ConcurrentHashMap<String, Labels> byField = new ConcurrentHashMap<>();
+
+        Prefix(String measurement, String[] tagKv) {
+            this.measurement = measurement;
+            this.tagKv = tagKv;
+            int a = 0;
+            while (a < tagKv.length && tagKv[a].compareTo(Labels.NAME) < 0) a += 2;
+            this.at = a;
+        }
+
+        Labels labels(String field) {
+            Labels l = byField.get(field);
+            if (l != null) return l;
+            String[] kv = new String[tagKv.length + 2];
+            System.arraycopy(tagKv, 0, kv, 0, at);
+            kv[at] = Labels.NAME;
+            kv[at + 1] = intern(measurement.isEmpty() ? field : measurement + "_" + field);
+            System.arraycopy(tagKv, at, kv, at + 2, tagKv.length - at);
+            l = Labels.fromSorted(kv);
+            Labels prev = byField.putIfAbsent(field, l);
+            return prev != null ? prev : l;
+        }
+    }
+
+    private static String intern(String s) {
+        byte[] b = s.getBytes(StandardCharsets.UTF_8);
+        String prev = STRINGS.putIfAbsent(new Key().set(b, 0, b.length), s);
+        return prev != null ? prev : s;
+    }
+
     private String str(byte[] b, int off, int len, boolean escaped) {
-        if (escaped) return unescape(b, off, len);
-        probe.set(b, off, len);
-        String s = strings.get(probe);
+        if (escaped) return intern(unescape(b, off, len));
+        String s = STRINGS.get(probe.set(b, off, len));
         if (s != null) return s;
+        if (STRINGS.size() > MAX_CACHED) STRINGS.clear();
         s = new String(b, off, len, StandardCharsets.UTF_8);
-        if (strings.size() > 200_000) strings.clear();
-        Key k = new Key();
-        k.set(Arrays.copyOfRange(b, off, off + len), 0, len);
-        strings.put(k, s);
-        return s;
+        String prev = STRINGS.putIfAbsent(probe.copy(), s);
+        return prev != null ? prev : s;
     }
 
     private static String unescape(byte[] b, int off, int len) {
@@ -67,14 +110,61 @@ public final class LineProtocol {
         return new String(out, 0, n, StandardCharsets.UTF_8);
     }
 
+    /** Parses {@code measurement,tag=v,...} in [s, e) into a prefix entry. */
+    private Prefix parsePrefix(byte[] b, int s, int e) {
+        int p = s;
+        boolean esc = false;
+        while (p < e && b[p] != ',') { if (b[p] == '\\') { esc = true; p++; } p++; }
+        String measurement = str(b, s, p - s, esc);
+        String[] tagKv = new String[16];
+        int nt = 0;
+        while (p < e && b[p] == ',') {
+            p++;
+            int ks = p;
+            esc = false;
+            while (p < e && b[p] != '=') { if (b[p] == '\\') { esc = true; p++; } p++; }
+            if (p >= e) throw new IllegalArgumentException("tag without value");
+            String k = str(b, ks, p - ks, esc);
+            p++;
+            int vs = p;
+            esc = false;
+            while (p < e && b[p] != ',') { if (b[p] == '\\') { esc = true; p++; } p++; }
+            String v = str(b, vs, p - vs, esc);
+            if (v.isEmpty() || k.equals(Labels.NAME)) continue;
+            if (nt + 2 > tagKv.length) tagKv = Arrays.copyOf(tagKv, tagKv.length * 2);
+            tagKv[nt++] = k;
+            tagKv[nt++] = v;
+        }
+        // sort by key (insertion sort: usually already sorted, and short); duplicate keys: last wins
+        for (int a = 2; a < nt; a += 2) {
+            String k = tagKv[a], v = tagKv[a + 1];
+            int c = a - 2;
+            while (c >= 0 && tagKv[c].compareTo(k) > 0) {
+                tagKv[c + 2] = tagKv[c];
+                tagKv[c + 3] = tagKv[c + 1];
+                c -= 2;
+            }
+            tagKv[c + 2] = k;
+            tagKv[c + 3] = v;
+        }
+        int w = 0;
+        for (int a = 0; a < nt; a += 2) {
+            if (w >= 2 && tagKv[w - 2].equals(tagKv[a])) { tagKv[w - 1] = tagKv[a + 1]; continue; }
+            tagKv[w] = tagKv[a];
+            tagKv[w + 1] = tagKv[a + 1];
+            w += 2;
+        }
+        return new Prefix(measurement, Arrays.copyOf(tagKv, w));
+    }
+
     /**
-     * Parses a body into {@code out}. {@code precisionMs} converts the timestamp unit to
-     * milliseconds as a divisor (1_000_000 for ns, 1_000 for us, 1 for ms) or multiplier (negative: -1000 for s).
+     * Parses a body into {@code out}. {@code precisionDivisor} converts the timestamp unit to
+     * milliseconds as a divisor (1_000_000 for ns, 1_000 for us, 1 for ms) or, when negative, a
+     * multiplier (-1000 for s).
      */
     public Stats parse(byte[] b, int len, long precisionDivisor, WriteBatch out) {
         Stats st = new Stats();
         int i = 0;
-        String[] tagKv = new String[32];
         String[] fieldNames = new String[64];
         double[] fieldVals = new double[64];
         long now = System.currentTimeMillis();
@@ -90,37 +180,23 @@ public final class LineProtocol {
             if (p >= e || b[p] == '#') continue;
             st.lines++;
             try {
-                // measurement
-                int ms = p;
-                boolean esc = false;
-                while (p < e && b[p] != ',' && b[p] != ' ') { if (b[p] == '\\') { esc = true; p++; } p++; }
-                String measurement = str(b, ms, p - ms, esc);
-                // tags
-                int nt = 0;
-                while (p < e && b[p] == ',') {
-                    p++;
-                    int ks = p;
-                    esc = false;
-                    while (p < e && b[p] != '=') { if (b[p] == '\\') { esc = true; p++; } p++; }
-                    String k = str(b, ks, p - ks, esc);
-                    p++;
-                    int vs = p;
-                    esc = false;
-                    while (p < e && b[p] != ',' && b[p] != ' ') { if (b[p] == '\\') { esc = true; p++; } p++; }
-                    String v = str(b, vs, p - vs, esc);
-                    if (v.isEmpty()) continue;
-                    if (nt + 2 > tagKv.length) tagKv = Arrays.copyOf(tagKv, tagKv.length * 2);
-                    tagKv[nt++] = k;
-                    tagKv[nt++] = v;
+                int ps = p;
+                while (p < e && b[p] != ' ') { if (b[p] == '\\') p++; p++; }
+                if (p >= e) throw new IllegalArgumentException("missing fields");
+                Prefix pre = PREFIXES.get(probe.set(b, ps, p - ps));
+                if (pre == null) {
+                    pre = parsePrefix(b, ps, p);
+                    if (PREFIXES.size() > MAX_CACHED) PREFIXES.clear();
+                    Prefix prev = PREFIXES.putIfAbsent(new Key().set(b, ps, p - ps).copy(), pre);
+                    if (prev != null) pre = prev;
                 }
-                if (p >= e || b[p] != ' ') throw new IllegalArgumentException("missing fields");
                 p++;
-                // fields
                 int nf = 0;
                 while (p < e && b[p] != ' ') {
                     int ks = p;
-                    esc = false;
+                    boolean esc = false;
                     while (p < e && b[p] != '=') { if (b[p] == '\\') { esc = true; p++; } p++; }
+                    if (p >= e) throw new IllegalArgumentException("field without value");
                     String k = str(b, ks, p - ks, esc);
                     p++;
                     if (p < e && b[p] == '"') {
@@ -150,7 +226,7 @@ public final class LineProtocol {
                 } else {
                     ts = now;
                 }
-                emit(measurement, tagKv, nt, fieldNames, fieldVals, nf, ts, out);
+                for (int f = 0; f < nf; f++) out.add(pre.labels(fieldNames[f]), ts, fieldVals[f]);
                 st.samples += nf;
             } catch (RuntimeException ex) {
                 st.errors++;
@@ -160,48 +236,6 @@ public final class LineProtocol {
             }
         }
         return st;
-    }
-
-    private void emit(String measurement, String[] tagKv, int nt, String[] fieldNames, double[] fieldVals, int nf,
-                      long ts, WriteBatch out) {
-        // sort tags by key (insertion sort: usually already sorted, and short)
-        for (int a = 2; a < nt; a += 2) {
-            String k = tagKv[a], v = tagKv[a + 1];
-            int c = a - 2;
-            while (c >= 0 && tagKv[c].compareTo(k) > 0) {
-                tagKv[c + 2] = tagKv[c];
-                tagKv[c + 3] = tagKv[c + 1];
-                c -= 2;
-            }
-            tagKv[c + 2] = k;
-            tagKv[c + 3] = v;
-        }
-        // drop duplicate keys (last wins) and find where __name__ goes
-        int w = 0;
-        for (int a = 0; a < nt; a += 2) {
-            if (tagKv[a].equals(Labels.NAME)) continue;
-            if (w >= 2 && tagKv[w - 2].equals(tagKv[a])) { tagKv[w - 1] = tagKv[a + 1]; continue; }
-            tagKv[w] = tagKv[a];
-            tagKv[w + 1] = tagKv[a + 1];
-            w += 2;
-        }
-        int at = 0;
-        while (at < w && tagKv[at].compareTo(Labels.NAME) < 0) at += 2;
-        for (int f = 0; f < nf; f++) {
-            String[] kv = new String[w + 2];
-            System.arraycopy(tagKv, 0, kv, 0, at);
-            kv[at] = Labels.NAME;
-            kv[at + 1] = metricName(measurement, fieldNames[f]);
-            System.arraycopy(tagKv, at, kv, at + 2, w - at);
-            out.add(Labels.fromSorted(kv), ts, fieldVals[f]);
-        }
-    }
-
-    private final HashMap<String, HashMap<String, String>> names = new HashMap<>();
-
-    private String metricName(String measurement, String field) {
-        return names.computeIfAbsent(measurement, k -> new HashMap<>())
-                .computeIfAbsent(field, f -> measurement.isEmpty() ? f : measurement + "_" + f);
     }
 
     private static double parseFieldValue(byte[] b, int s, int e) {

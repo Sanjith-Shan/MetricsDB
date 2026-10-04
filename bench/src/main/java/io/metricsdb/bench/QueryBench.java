@@ -11,21 +11,25 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Runs the benchmark's queries against one database and records latency per query type. Each
- * type runs as its own pass after a warm-up pass over the same queries, so every database is
- * measured with warm caches (its own) and the same query list.
+ * type first runs its first 20 queries as a warm-up (JIT, page cache), then the remaining queries
+ * are measured; they differ from the warm-up ones, so a result cache cannot answer them.
  */
 public final class QueryBench {
     public static void run(Args a) throws Exception {
         String base = a.req("url");
         List<Queries.Q> qs = Queries.load(a.req("queries"), a.str("types", null));
         int workers = a.i("workers", 1);
-        boolean warm = !a.b("no-warmup");
+        int warmup = a.i("warmup", 20);
         String suffix = a.str("suffix", "");
         Map<String, List<Queries.Q>> byType = new LinkedHashMap<>();
         for (Queries.Q q : qs) byType.computeIfAbsent(q.type(), k -> new java.util.ArrayList<>()).add(q);
         for (var e : byType.entrySet()) {
-            List<Queries.Q> list = e.getValue();
-            if (warm) for (Queries.Q q : list) Queries.get(base, q.path() + suffix, Duration.ofSeconds(120));
+            // warm up on the first queries of the type, measure the rest: different hosts and windows,
+            // so no database can answer the measured queries from a result cache
+            List<Queries.Q> all = e.getValue();
+            int w0 = Math.min(warmup, all.size() / 2);
+            for (Queries.Q q : all.subList(0, w0)) Queries.get(base, q.path() + suffix, Duration.ofSeconds(120));
+            List<Queries.Q> list = all.subList(w0, all.size());
             Histogram h = new Histogram(600_000_000L, 3);
             AtomicInteger next = new AtomicInteger(), errors = new AtomicInteger();
             String[] firstError = new String[1];

@@ -391,7 +391,7 @@ public final class Tsdb implements Queryable, Closeable {
                 List<Chunk> forRollup = new ArrayList<>(cs);
                 s.chunks(b, b, forRollup); // the sample at exactly b closes the last bucket
                 SampleArray sa = SampleArray.decode(forRollup, a + 1, b, null);
-                w.addSeries(s.labels, cs, Rollup.build(sa, a, b, opt.rollupResMs));
+                w.addSeries(s.labels, recode(cs), Rollup.build(sa, a, b, opt.rollupResMs));
                 ids.add(s.id);
             }
             if (ids.isEmpty()) {
@@ -415,6 +415,16 @@ public final class Tsdb implements Queryable, Closeable {
         checkpoint();
         blocksCut.incrementAndGet();
         hooks.cutNanos.accept(System.nanoTime() - t0);
+    }
+
+    /** Re-encodes head chunks for a block: integer-valued chunks switch to the integer encoding. */
+    private static List<Chunk> recode(List<Chunk> cs) {
+        List<Chunk> out = new ArrayList<>(cs.size());
+        for (Chunk c : cs) {
+            SampleArray sa = SampleArray.decode(List.of(c), Long.MIN_VALUE, Long.MAX_VALUE, null);
+            out.add(Chunk.of(c.minT(), c.maxT(), XorChunk.encodeBest(sa.t, sa.v, 0, sa.n)));
+        }
+        return out;
     }
 
     /** Seals the WAL and replaces everything up to the seal with an image of the current head. */
@@ -500,7 +510,7 @@ public final class Tsdb implements Queryable, Closeable {
         try {
             for (var e : union.entrySet()) {
                 List<Chunk> raw = new ArrayList<>();
-                XorChunk.Appender[] ra = null;
+                SampleArray[] ra = null;
                 for (int bi = 0; bi < group.size(); bi++) {
                     int loc = e.getValue()[bi];
                     if (loc < 0) continue;
@@ -509,22 +519,22 @@ public final class Tsdb implements Queryable, Closeable {
                     Chunk[] r = b.rollupByLocal(loc);
                     if (r != null) {
                         if (ra == null) {
-                            ra = new XorChunk.Appender[Rollup.AGGS];
-                            for (int k = 0; k < Rollup.AGGS; k++) ra[k] = new XorChunk.Appender();
+                            ra = new SampleArray[Rollup.AGGS];
+                            for (int k = 0; k < Rollup.AGGS; k++) ra[k] = new SampleArray(64);
                         }
                         for (int k = 0; k < Rollup.AGGS; k++) {
                             XorChunk.Iterator it = r[k].iterator();
                             while (it.next()) {
-                                if (ra[k].count() > 0 && it.t() <= ra[k].lastT()) continue;
-                                ra[k].append(it.t(), it.v());
+                                if (ra[k].n > 0 && it.t() <= ra[k].t[ra[k].n - 1]) continue;
+                                ra[k].add(it.t(), it.v());
                             }
                         }
                     }
                 }
                 Chunk[] rollup = null;
-                if (ra != null && ra[0].count() > 0) {
+                if (ra != null && ra[0].n > 0) {
                     rollup = new Chunk[Rollup.AGGS];
-                    for (int k = 0; k < Rollup.AGGS; k++) rollup[k] = Chunk.of(ra[k].minT(), ra[k].maxT(), ra[k].toBytes());
+                    for (int k = 0; k < Rollup.AGGS; k++) rollup[k] = Rollup.encode(ra[k]);
                 }
                 w.addSeries(e.getKey(), raw, rollup);
             }
