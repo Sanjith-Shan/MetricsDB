@@ -72,12 +72,31 @@ public final class Wire {
                 o.u8(0);
             } else {
                 o.u8(1);
-                labels(o, l);
+                ByteOut lb = new ByteOut(64);
+                labels(lb, l);
+                o.lenBytes(lb.toByteArray()); // length-prefixed so the receiver can cache by bytes
                 prev = l;
             }
             o.varint(b.t[i]).i64(Double.doubleToRawLongBits(b.v[i]));
         }
         return o.toByteArray();
+    }
+
+    /** Encoded label blocks seen by this node: repeated series cost a hash of their bytes. */
+    private static final java.util.concurrent.ConcurrentHashMap<BytesKey, Labels> LABELS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record BytesKey(byte[] a, int off, int len, int hash) {
+        BytesKey(byte[] a, int off, int len) { this(a, off, len, hash(a, off, len)); }
+        static int hash(byte[] a, int off, int len) {
+            int h = 1;
+            for (int i = off; i < off + len; i++) h = 31 * h + a[i];
+            return h;
+        }
+        BytesKey copy() { return new BytesKey(java.util.Arrays.copyOfRange(a, off, off + len), 0, len, hash); }
+        @Override public int hashCode() { return hash; }
+        @Override public boolean equals(Object o) {
+            return o instanceof BytesKey k && k.len == len && java.util.Arrays.equals(a, off, off + len, k.a, k.off, k.off + k.len);
+        }
     }
 
     public static WriteBatch decodeBatch(byte[] data) {
@@ -87,7 +106,18 @@ public final class Wire {
         Labels cur = null;
         Map<String, String> intern = new HashMap<>();
         for (int k = 0; k < n; k++) {
-            if (in.u8() == 1) cur = labels(in, intern);
+            if (in.u8() == 1) {
+                int len = (int) in.uvarint();
+                int at = in.position();
+                BytesKey probe = new BytesKey(data, at, len);
+                cur = LABELS.get(probe);
+                if (cur == null) {
+                    cur = labels(new ByteIn(data, at, len), intern);
+                    if (LABELS.size() > (1 << 20)) LABELS.clear();
+                    LABELS.put(probe.copy(), cur);
+                }
+                in.skip(len);
+            }
             long t = in.varint();
             double v = Double.longBitsToDouble(in.i64());
             b.add(cur, t, v);

@@ -99,7 +99,17 @@ public final class Labels implements Comparable<Labels> {
     }
 
     /** Stable 64-bit hash used for consistent hashing; identical on every node and JVM. */
+    private long stable; // cached; 0 means not computed yet
+
     public long stableHash() {
+        long s = stable;
+        if (s != 0) return s;
+        s = computeStableHash();
+        stable = s == 0 ? 1 : s;
+        return stable;
+    }
+
+    private long computeStableHash() {
         long h = 0xcbf29ce484222325L;
         for (String s : kv) {
             for (int i = 0; i < s.length(); i++) {

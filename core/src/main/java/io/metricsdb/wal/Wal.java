@@ -189,7 +189,13 @@ public final class Wal implements Closeable {
                 crc.reset();
                 crc.update(p, 0, p.length);
                 out.i32(p.length).i32((int) crc.getValue()).bytes(p);
-                if (out.length() > (4 << 20)) { writeAll(c, out); out.reset(); }
+                if (out.length() > (8 << 20)) {
+                    writeAll(c, out);
+                    out.reset();
+                    // flush as we go: one large flush at the end would queue every acknowledgement
+                    // fsync behind it (the WAL and the checkpoint share the disk and its journal)
+                    c.force(false);
+                }
             }
             writeAll(c, out);
             c.force(true);

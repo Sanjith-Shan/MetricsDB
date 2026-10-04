@@ -3,7 +3,7 @@
 # Docker on 127.0.0.1:9201 (scripts/demo.sh starts it). Host networking, every port on 127.0.0.1.
 services:
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.15.0
     network_mode: host
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -12,7 +12,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
   grafana:
-    image: grafana/grafana:12.1.1
+    image: grafana/grafana:13.0.10
     network_mode: host
     environment:
       GF_SERVER_HTTP_ADDR: 127.0.0.1
@@ -26,7 +26,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
   renderer:
-    image: grafana/grafana-image-renderer:v4.0.10
+    image: grafana/grafana-image-renderer:v5.12.5
     network_mode: host
     environment:
       HTTP_HOST: 127.0.0.1

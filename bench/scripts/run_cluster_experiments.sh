@@ -10,7 +10,7 @@ for rf in 1 2; do
     --work $W/run/exp5 --out $RESULTS/exp5.jsonl --timeline $RESULTS/exp5_timeline.jsonl
 done
 $BENCH exp5 --jar $JAR --rf 2 --wipe --series 1000 --ticks-per-s 10 --kill-at 20 --restart-at 40 --end-at 60 \
-  --work $W/run/exp5 --out $RESULTS/exp5.jsonl --label rf2-wipe
+  --work $W/run/exp5 --out $RESULTS/exp5.jsonl --timeline $RESULTS/exp5_timeline.jsonl --label rf2-wipe
 # throughput of the 3-node cluster: the benchmark file through the router (RF=2)
 $REPO/bench/scripts/cluster_ingest.sh
 # out-of-order: 10% of samples late by up to 5 min (inside the 10 min window), then up to 20 min
