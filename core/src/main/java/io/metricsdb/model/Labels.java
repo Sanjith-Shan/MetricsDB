@@ -20,6 +20,8 @@ public final class Labels implements Comparable<Labels> {
     private final int hash;
     /** Set by the storage engine: this label set's series in one database, to skip the hash lookup. */
     public volatile Object seriesRef;
+    /** Set by the wire encoder: this label set serialized, reused for every sample of the series. */
+    public volatile byte[] wireBytes;
 
     private Labels(String[] sortedKv) {
         this.kv = sortedKv;

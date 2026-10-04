@@ -72,9 +72,13 @@ public final class Wire {
                 o.u8(0);
             } else {
                 o.u8(1);
-                ByteOut lb = new ByteOut(64);
-                labels(lb, l);
-                o.lenBytes(lb.toByteArray()); // length-prefixed so the receiver can cache by bytes
+                byte[] enc = l.wireBytes;
+                if (enc == null) {
+                    ByteOut lb = new ByteOut(64);
+                    labels(lb, l);
+                    l.wireBytes = enc = lb.toByteArray();
+                }
+                o.lenBytes(enc); // length-prefixed so the receiver can cache by bytes
                 prev = l;
             }
             o.varint(b.t[i]).i64(Double.doubleToRawLongBits(b.v[i]));
