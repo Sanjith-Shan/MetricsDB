@@ -105,7 +105,7 @@ Windows need not line up with buckets. A window `(t - w, t]` splits exactly into
 rounded up and `b` is `t` rounded down to five minutes. Only the two edge slices are decoded from
 raw chunks, so a one-hour window reads 12 buckets and roughly two partial chunks instead of 360
 samples. The engine takes this path for `min/max/sum/count/avg/last_over_time` with windows of
-30 minutes or more (configurable, or forced per query with `rollup=on|off`), and the answer is
+30 minutes or more whose steps are at least half the window (sliding windows are cheaper as one raw pass; configurable, or forced per query with `rollup=on|off`), and the answer is
 the raw evaluation's, up to float rounding in sums (tests compare the two on aligned and unaligned windows, and exp4 compares
 with VictoriaMetrics). `rate` always reads raw data.
 

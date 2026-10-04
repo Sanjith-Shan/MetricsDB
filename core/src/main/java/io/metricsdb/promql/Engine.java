@@ -410,7 +410,10 @@ public final class Engine {
     private boolean useRollup(String f, long w, long off, Ctx c) {
         if (c.rollup == RollupMode.OFF || !Functions.ROLLUP_ABLE.contains(f)) return false;
         if (w < 2 * opt.rollupResMs) return false; // no whole bucket fits in the window
-        return c.rollup == RollupMode.FORCE || w >= opt.rollupMinWindowMs;
+        if (c.rollup == RollupMode.FORCE) return true;
+        // sliding windows (step much shorter than the window) are cheaper as one raw pass: the edges
+        // would be decoded again at every step
+        return w >= opt.rollupMinWindowMs && (c.n == 1 || 2 * c.step >= w);
     }
 
     /**
