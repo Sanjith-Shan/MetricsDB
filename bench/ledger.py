@@ -15,7 +15,7 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "NUMBERS.md"
 
 NAME = {"metricsdb": "MetricsDB", "vm": "VictoriaMetrics", "victoriametrics": "VictoriaMetrics",
         "influx": "InfluxDB", "influxdb": "InfluxDB", "metricsdb-cluster": "MetricsDB, 3 nodes, RF=2",
-        "metricsdb-3-nodes-rf2": "MetricsDB, 3 nodes, RF=2 (first 2M lines)", "metricsdb-fsync-off": "MetricsDB, WAL fsync off"}
+        "metricsdb-3-nodes-rf2": "MetricsDB, 3 nodes, RF=2 (first 2M lines)", "metricsdb-fsync-off": "MetricsDB, WAL fsync off", "metricsdb-rollups-off": "MetricsDB, rollups off"}
 TYPES = ["single-groupby-1-1-1", "single-groupby-1-1-12", "single-groupby-1-8-1", "single-groupby-5-1-1",
          "single-groupby-5-1-12", "single-groupby-5-8-1", "cpu-max-all-1", "cpu-max-all-8",
          "double-groupby-1", "double-groupby-5", "double-groupby-all"]
@@ -75,7 +75,7 @@ if m0:
     w("")
 
 # ---------------------------------------------------------------- exp1
-e1 = [r for r in rows("exp1.jsonl") if not r.get("label", "").startswith("prelim")]
+e1 = [r for r in rows("exp1.jsonl") if not r.get("label", "").startswith("prelim") and r.get("label") != "metricsdb-fsync-off"]
 if e1:
     w("## exp1: bytes per sample on disk (`results/exp1.jsonl`)")
     w("")
@@ -129,7 +129,7 @@ if e3:
       "InfluxQL for InfluxDB, same hosts and time windows). The first 20 of each type warm up the database and are "
       "not measured; the other 80 run one at a time. Milliseconds, client side.")
     w("")
-    dbs = [d for d in ["metricsdb", "victoriametrics", "influxdb"] if any(r["db"] == d for r in e3)]
+    dbs = [d for d in ["metricsdb", "metricsdb-rollups-off", "victoriametrics", "influxdb"] if any(r["db"] == d for r in e3)]
     w("| query type | " + " | ".join(f"{NAME[d]} p50 | {NAME[d]} p99" for d in dbs) + " | MetricsDB p50 vs VictoriaMetrics |")
     w("|---|" + "---|---|" * len(dbs) + "---|")
     by = defaultdict(list)

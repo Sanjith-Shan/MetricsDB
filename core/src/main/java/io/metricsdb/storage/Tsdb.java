@@ -378,6 +378,9 @@ public final class Tsdb implements Queryable, Closeable {
 
     private void cut(long a, long b) throws IOException {
         long t0 = System.nanoTime();
+        // every later block's rollup starts after the previous block's last bucket; the first one
+        // must also hold the bucket ending exactly at its start (the sample at a itself)
+        boolean firstRange = minValidT == Long.MIN_VALUE;
         appendLock.writeLock().lock();
         try {
             minValidT = b; // late samples for [a, b) are refused from now on
@@ -397,8 +400,8 @@ public final class Tsdb implements Queryable, Closeable {
                 cs.sort(Comparator.comparingLong(Chunk::minT));
                 List<Chunk> forRollup = new ArrayList<>(cs);
                 s.chunks(b, b, forRollup); // the sample at exactly b closes the last bucket
-                SampleArray sa = SampleArray.decode(forRollup, a + 1, b, null);
-                w.addSeries(s.labels, recode(cs), Rollup.build(sa, a, b, opt.rollupResMs));
+                SampleArray sa = SampleArray.decode(forRollup, firstRange ? a : a + 1, b, null);
+                w.addSeries(s.labels, recode(cs), Rollup.build(sa, firstRange ? a - 1 : a, b, opt.rollupResMs));
                 ids.add(s.id);
             }
             if (ids.isEmpty()) {

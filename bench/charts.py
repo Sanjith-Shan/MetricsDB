@@ -121,7 +121,7 @@ def exp3():
     ax.set_xlabel("median latency, ms (log scale, lower is better)")
     ax.set_title("Latency per benchmark query type", loc="left", fontsize=11)
     ax.grid(axis="y", visible=False)
-    ax.legend(frameon=False, loc="lower right")
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.45, -0.12), ncol=3)
     save(fig, "query_latency.png")
 
 

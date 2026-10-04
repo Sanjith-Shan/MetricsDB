@@ -32,8 +32,8 @@ public final class Engine {
         /** Align start and end to the step like VictoriaMetrics does for ranges of 50+ points. */
         public boolean alignLikeVictoriaMetrics = true;
         public long rollupResMs = 300_000;
-        /** In AUTO mode rollups are used when the step is at least this long. */
-        public long rollupMinStepMs = 3_600_000;
+        /** In AUTO mode a window at least this long is answered from rollups plus raw edges. */
+        public long rollupMinWindowMs = 1_800_000;
         public int maxSteps = 11_000;
     }
 
@@ -409,63 +409,118 @@ public final class Engine {
 
     private boolean useRollup(String f, long w, long off, Ctx c) {
         if (c.rollup == RollupMode.OFF || !Functions.ROLLUP_ABLE.contains(f)) return false;
-        long res = opt.rollupResMs;
-        boolean aligned = w % res == 0 && off % res == 0 && Math.floorMod(c.start, res) == 0 && (c.n == 1 || c.step % res == 0);
-        if (!aligned) return false;
-        return c.rollup == RollupMode.FORCE || c.step >= opt.rollupMinStepMs;
+        if (w < 2 * opt.rollupResMs) return false; // no whole bucket fits in the window
+        return c.rollup == RollupMode.FORCE || w >= opt.rollupMinWindowMs;
     }
 
     /**
-     * Answers a window function from rollup buckets. A bucket ending at e covers (e - res, e], so
-     * with bucket-aligned steps and windows the window (t - w, t] is exactly the buckets ending
-     * in that interval, and the result equals the raw evaluation.
+     * Answers a window function from rollup buckets plus raw samples at the window's edges. A
+     * bucket ending at e covers (e - res, e], so the window (t - w, t] splits exactly into
+     * (t - w, a], whole buckets ending in (a, b], and (b, t], where a and b are t - w rounded up
+     * and t rounded down to the bucket size. Only the two edge slices need raw samples, so for a
+     * one-hour window about a tenth of the samples are decoded, and the answer is the same as the
+     * raw evaluation (sums may differ in the last bits of float precision).
      */
     private Vector rangeFromRollup(String f, Ast.MatrixSel ms, Ctx c) {
-        long w = ms.rangeMs(), off = ms.sel().offsetMs();
+        long w = ms.rangeMs(), off = ms.sel().offsetMs(), res = opt.rollupResMs;
         long mint = c.start - off - w + 1;
         long maxt = c.end() - off;
-        List<RollupSeries> sel = storage.selectRollup(ms.sel().matchers(), mint, maxt, opt.rollupResMs, c.qctx);
-        if (sel == null) return null;
-        int agg = switch (f) {
-            case "max_over_time" -> Rollup.MAX;
-            case "min_over_time" -> Rollup.MIN;
-            case "sum_over_time", "avg_over_time" -> Rollup.SUM;
-            case "count_over_time" -> Rollup.COUNT;
-            default -> Rollup.LAST;
-        };
+        List<RollupSeries> rolled = storage.selectRollup(ms.sel().matchers(), mint, maxt, res, c.qctx);
+        if (rolled == null) return null;
+        Map<Labels, List<io.metricsdb.storage.Chunk>> raw = new HashMap<>();
+        for (SeriesChunks sc : storage.select(ms.sel().matchers(), mint, maxt, c.qctx)) raw.put(sc.labels(), sc.chunks());
+        Map<Labels, RollupSeries> byLabels = new HashMap<>();
+        for (RollupSeries rs : rolled) byLabels.put(rs.labels(), rs);
         boolean keepName = Functions.KEEP_NAME.contains(f);
-        List<StepSeries> out = new ArrayList<>(sel.size());
-        for (RollupSeries rs : sel) {
-            SampleArray a = SampleArray.decode(rs.aggs()[agg], mint, maxt, c.qctx);
-            SampleArray cnt = f.equals("avg_over_time") ? SampleArray.decode(rs.aggs()[Rollup.COUNT], mint, maxt, c.qctx) : null;
-            StepSeries s = new StepSeries(keepName ? rs.labels() : rs.labels().withoutName(), c.n);
-            int lo = 0, hi = 0;
+        List<Map.Entry<Labels, List<io.metricsdb.storage.Chunk>>> work = new ArrayList<>(raw.entrySet());
+        return new Vector(parallelMap(work, e -> {
+            Labels labels = e.getKey();
+            io.metricsdb.storage.Chunk[] chunks = SampleArray.sortByMinT(e.getValue());
+            RollupSeries rs = byLabels.get(labels);
+            SampleArray mx = null, mn = null, sum = null, cnt = null, last = null;
+            if (rs != null) {
+                switch (f) {
+                    case "max_over_time" -> mx = SampleArray.decode(rs.aggs()[Rollup.MAX], mint, maxt, c.qctx);
+                    case "min_over_time" -> mn = SampleArray.decode(rs.aggs()[Rollup.MIN], mint, maxt, c.qctx);
+                    case "count_over_time" -> cnt = SampleArray.decode(rs.aggs()[Rollup.COUNT], mint, maxt, c.qctx);
+                    case "last_over_time" -> last = SampleArray.decode(rs.aggs()[Rollup.LAST], mint, maxt, c.qctx);
+                    default -> {
+                        sum = SampleArray.decode(rs.aggs()[Rollup.SUM], mint, maxt, c.qctx);
+                        cnt = SampleArray.decode(rs.aggs()[Rollup.COUNT], mint, maxt, c.qctx);
+                    }
+                }
+            }
+            StepSeries s = new StepSeries(keepName ? labels : labels.withoutName(), c.n);
             for (int i = 0; i < c.n; i++) {
                 long ts = c.ts(i) - off;
-                while (hi < a.n && a.t[hi] <= ts) hi++;
-                while (lo < hi && a.t[lo] <= ts - w) lo++;
-                if (hi == lo) continue;
-                double r;
-                switch (f) {
-                    case "max_over_time" -> { r = a.v[lo]; for (int k = lo + 1; k < hi; k++) r = Math.max(r, a.v[k]); }
-                    case "min_over_time" -> { r = a.v[lo]; for (int k = lo + 1; k < hi; k++) r = Math.min(r, a.v[k]); }
-                    case "sum_over_time", "count_over_time" -> { r = 0; for (int k = lo; k < hi; k++) r += a.v[k]; }
-                    case "avg_over_time" -> {
-                        double sum = 0, n = 0;
-                        for (int k = lo; k < hi; k++) sum += a.v[k];
-                        // count buckets share the sum buckets' timestamps
-                        int clo = lowerBound(cnt, a.t[lo]), chi = lowerBound(cnt, a.t[hi - 1] + 1);
-                        for (int k = clo; k < chi; k++) n += cnt.v[k];
-                        r = sum / n;
+                long from = ts - w;                                   // window is (from, ts]
+                long a = Math.floorDiv(from + res - 1, res) * res;    // from rounded up
+                long b = Math.floorDiv(ts, res) * res;                // ts rounded down
+                Acc acc = new Acc();
+                if (a > b || rs == null) {
+                    acc.addRaw(SampleArray.decodeSorted(chunks, from + 1, ts, c.qctx));
+                } else {
+                    acc.addRaw(SampleArray.decodeSorted(chunks, from + 1, a, c.qctx));
+                    switch (f) {
+                        case "max_over_time" -> acc.addBuckets(mx, a, b, Rollup.MAX);
+                        case "min_over_time" -> acc.addBuckets(mn, a, b, Rollup.MIN);
+                        case "count_over_time" -> acc.addBuckets(cnt, a, b, Rollup.COUNT);
+                        case "last_over_time" -> acc.addBuckets(last, a, b, Rollup.LAST);
+                        default -> { acc.addBuckets(sum, a, b, Rollup.SUM); acc.addBuckets(cnt, a, b, Rollup.COUNT); }
                     }
-                    default -> r = a.v[hi - 1];
+                    acc.addRaw(SampleArray.decodeSorted(chunks, b + 1, ts, c.qctx));
                 }
-                s.v[i] = r;
+                if (!acc.any) continue;
+                s.v[i] = switch (f) {
+                    case "max_over_time" -> acc.max;
+                    case "min_over_time" -> acc.min;
+                    case "sum_over_time" -> acc.sum;
+                    case "count_over_time" -> acc.count;
+                    case "avg_over_time" -> acc.sum / acc.count;
+                    default -> acc.last;
+                };
                 s.has[i] = true;
             }
-            out.add(s);
+            return s;
+        }));
+    }
+
+    /** Running aggregate over raw samples and whole buckets, in time order. */
+    private static final class Acc {
+        double max, min, sum, count, last;
+        boolean any;
+
+        void add(double v) {
+            if (!any) { max = v; min = v; }
+            else {
+                if (v > max || Double.isNaN(max)) max = v;
+                if (v < min || Double.isNaN(min)) min = v;
+            }
+            last = v;
+            any = true;
         }
-        return new Vector(out);
+
+        void addRaw(SampleArray sa) {
+            for (int k = 0; k < sa.n; k++) {
+                add(sa.v[k]);
+                sum += sa.v[k];
+                count++;
+            }
+        }
+
+        /** Buckets ending in (a, b]; MAX, MIN and LAST fold like samples, SUM and COUNT add up. */
+        void addBuckets(SampleArray agg, long a, long b, int kind) {
+            if (agg == null) return;
+            int from = lowerBound(agg, a + 1), to = lowerBound(agg, b + 1);
+            for (int k = from; k < to; k++) {
+                double v = agg.v[k];
+                switch (kind) {
+                    case Rollup.SUM -> { sum += v; any = true; }
+                    case Rollup.COUNT -> { count += v; any = true; }
+                    default -> add(v);
+                }
+            }
+        }
     }
 
     private static int lowerBound(SampleArray a, long t) {

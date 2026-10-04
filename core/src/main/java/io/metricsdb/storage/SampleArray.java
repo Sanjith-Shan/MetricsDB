@@ -33,10 +33,19 @@ public final class SampleArray {
      * timestamp, keeping the first value seen in chunk order.
      */
     public static SampleArray decode(List<Chunk> chunks, long mint, long maxt, QueryContext ctx) {
-        int est = 0;
-        boolean sorted = true;
+        return decodeSorted(sortByMinT(chunks), mint, maxt, ctx);
+    }
+
+    public static Chunk[] sortByMinT(List<Chunk> chunks) {
         Chunk[] cs = chunks.toArray(new Chunk[0]);
         Arrays.sort(cs, Comparator.comparingLong(Chunk::minT));
+        return cs;
+    }
+
+    /** Like {@link #decode} for chunks already sorted by {@code minT}. */
+    public static SampleArray decodeSorted(Chunk[] cs, long mint, long maxt, QueryContext ctx) {
+        int est = 0;
+        boolean sorted = true;
         for (int i = 0; i < cs.length; i++) {
             if (!cs[i].overlaps(mint, maxt)) continue;
             est += cs[i].count();

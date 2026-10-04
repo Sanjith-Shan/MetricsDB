@@ -208,6 +208,37 @@ class TsdbTest {
         db.close();
     }
 
+    @Test
+    void rollupsWithRawEdgesMatchRawForUnalignedWindows(@TempDir Path dir) {
+        Tsdb db = new Tsdb(opts(dir));
+        Random r = new Random(9);
+        for (long t = T0; t < T0 + 20 * H; t += 10_000) {
+            WriteBatch b = new WriteBatch();
+            for (int s = 0; s < 3; s++) b.add(series(s), t, Math.rint(r.nextGaussian() * 50));
+            db.append(b);
+            if ((t - T0) % H == 0) db.maintain();
+        }
+        db.maintain(); // blocks for most of the day, the last hours still in the head
+        Engine e = new Engine(db, new Engine.Options());
+        // unaligned starts, windows reaching back to the very first sample, and windows into the head
+        long[][] ranges = {{T0 + 1_234, T0 + 12 * H, H}, {T0 + 37_000, T0 + 19 * H + 999, 1_800_000}, {T0 + H, T0 + 20 * H, H}};
+        for (long[] rg : ranges) {
+            for (String f : List.of("max_over_time", "min_over_time", "sum_over_time", "count_over_time", "avg_over_time", "last_over_time")) {
+                String q = f + "(cpu_usage_1{hostname=\"host_1\"}[1h])";
+                Engine.Result raw = e.rangeQuery(q, rg[0], rg[1], rg[2], QueryContext.unlimited(), Engine.RollupMode.OFF);
+                Engine.Result hybrid = e.rangeQuery(q, rg[0], rg[1], rg[2], QueryContext.unlimited(), Engine.RollupMode.AUTO);
+                assertTrue(hybrid.usedRollup, f);
+                var a = raw.series.get(0);
+                var b = hybrid.series.get(0);
+                for (int k = 0; k < raw.steps; k++) {
+                    assertEquals(a.has[k], b.has[k], f + " step " + k);
+                    if (a.has[k]) assertEquals(a.v[k], b.v[k], Math.abs(a.v[k]) * 1e-12, f + " step " + k + " at " + raw.time(k));
+                }
+            }
+        }
+        db.close();
+    }
+
     static void deleteTree(Path p) throws IOException {
         if (!Files.exists(p)) return;
         try (var s = Files.walk(p)) {
